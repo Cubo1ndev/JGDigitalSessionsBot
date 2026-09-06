@@ -1,19 +1,15 @@
-import asyncio
 import discord
 from discord.ext import commands
 
 import config
 import database
+from cogs.sessions import SessionView
 
 COGS = [
-    "cogs.admin",
-    "cogs.user",
-    "cogs.history",
-    "cogs.leaderboard",
+    "cogs.sessions",
 ]
 
 intents = discord.Intents.default()
-intents.members = True
 
 
 class Bot(commands.Bot):
@@ -27,6 +23,9 @@ class Bot(commands.Bot):
         for cog in COGS:
             await self.load_extension(cog)
 
+        for session in await database.get_pending_sessions():
+            self.add_view(SessionView(session["id"]))
+
         if config.GUILD_ID:
             guild = discord.Object(id=config.GUILD_ID)
             self.tree.copy_global_to(guild=guild)
@@ -36,7 +35,7 @@ class Bot(commands.Bot):
 
     async def on_ready(self) -> None:
         await self.change_presence(
-            activity=discord.CustomActivity(name="Guarding thy gold")
+            activity=discord.CustomActivity(name="Hosting bus sessions")
         )
         print(f"Logged in as {self.user} (ID: {self.user.id})")
         print(f"Guild ID: {config.GUILD_ID or 'global'}")
