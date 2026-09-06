@@ -12,187 +12,176 @@ def set_path(path: str) -> None:
 async def init_db() -> None:
     async with aiosqlite.connect(_db_path) as db:
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS wallets (
-                user_id TEXT PRIMARY KEY,
-                pending INTEGER DEFAULT 0,
-                paid    INTEGER DEFAULT 0
+            CREATE TABLE IF NOT EXISTS sessions (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id       TEXT    NOT NULL,
+                channel_id     TEXT    NOT NULL,
+                message_id     TEXT,
+                host_id        TEXT    NOT NULL,
+                company_name   TEXT    NOT NULL,
+                max_players    INTEGER NOT NULL,
+                start_time_utc TEXT    NOT NULL,
+                status         TEXT    NOT NULL DEFAULT 'pending'
             )
         """)
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS history (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT    NOT NULL,
-                actor_id  TEXT    NOT NULL,
-                target_id TEXT    NOT NULL,
-                action    TEXT    NOT NULL,
-                amount    INTEGER NOT NULL,
-                reason    TEXT
+            CREATE TABLE IF NOT EXISTS session_players (
+                session_id INTEGER NOT NULL,
+                user_id    TEXT    NOT NULL,
+                joined_at  TEXT    NOT NULL,
+                PRIMARY KEY (session_id, user_id)
             )
         """)
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS bot_admins (
-                user_id    TEXT PRIMARY KEY,
-                granted_by TEXT NOT NULL,
-                granted_at TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS host_roles (
+                guild_id TEXT PRIMARY KEY,
+                role_id  TEXT NOT NULL
             )
         """)
+        # Offset the id sequence so session ids read as long ids (100000001, ...)
+        # instead of small ones (1, 2, ...).
+        await db.execute(
+            "INSERT INTO sqlite_sequence (name, seq) "
+            "SELECT 'sessions', 100000000 "
+            "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'sessions')"
+        )
+        await db.execute(
+            "UPDATE sqlite_sequence SET seq = 100000000 "
+            "WHERE name = 'sessions' AND seq < 100000000"
+        )
         await db.commit()
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return datetime.now(timezone.utc).isoformat()
 
 
-# --- Wallet ---
+# --- Host roles ---
 
-async def get_wallet(user_id: int) -> tuple[int, int]:
-    """Returns (pending, paid) for a user. Creates row if absent."""
-    uid = str(user_id)
+async def set_host_role(guild_id: int, role_id: int) -> None:
     async with aiosqlite.connect(_db_path) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO wallets (user_id) VALUES (?)", (uid,)
+            "INSERT INTO host_roles (guild_id, role_id) VALUES (?, ?) "
+            "ON CONFLICT(guild_id) DO UPDATE SET role_id = excluded.role_id",
+            (str(guild_id), str(role_id)),
         )
         await db.commit()
+
+
+async def get_host_role(guild_id: int) -> int | None:
+    async with aiosqlite.connect(_db_path) as db:
         async with db.execute(
-            "SELECT pending, paid FROM wallets WHERE user_id = ?", (uid,)
+            "SELECT role_id FROM host_roles WHERE guild_id = ?", (str(guild_id),)
         ) as cur:
             row = await cur.fetchone()
-    return (row[0], row[1])
+    return int(row[0]) if row else None
 
 
-async def add_pending(user_id: int, amount: int) -> tuple[int, int]:
-    """Adds amount to pending (can be negative). Returns new (pending, paid)."""
-    uid = str(user_id)
+# --- Sessions ---
+
+async def create_session(
+    guild_id: int,
+    channel_id: int,
+    host_id: int,
+    company_name: str,
+    max_players: int,
+    start_time_utc: datetime,
+) -> int:
+    """Returns the new session's id."""
     async with aiosqlite.connect(_db_path) as db:
-        await db.execute(
-            "INSERT OR IGNORE INTO wallets (user_id) VALUES (?)", (uid,)
-        )
-        await db.execute(
-            "UPDATE wallets SET pending = pending + ? WHERE user_id = ?",
-            (amount, uid),
-        )
-        await db.commit()
-        async with db.execute(
-            "SELECT pending, paid FROM wallets WHERE user_id = ?", (uid,)
-        ) as cur:
-            row = await cur.fetchone()
-    return (row[0], row[1])
-
-
-async def confirm_pay(user_id: int) -> int:
-    """Moves all pending to paid. Returns the amount moved."""
-    uid = str(user_id)
-    async with aiosqlite.connect(_db_path) as db:
-        await db.execute(
-            "INSERT OR IGNORE INTO wallets (user_id) VALUES (?)", (uid,)
-        )
-        async with db.execute(
-            "SELECT pending FROM wallets WHERE user_id = ?", (uid,)
-        ) as cur:
-            row = await cur.fetchone()
-        moved = row[0]
-        if moved > 0:
-            await db.execute(
-                "UPDATE wallets SET paid = paid + pending, pending = 0 WHERE user_id = ?",
-                (uid,),
-            )
-            await db.commit()
-    return moved
-
-
-# --- History ---
-
-async def add_history(
-    actor_id: int,
-    target_id: int,
-    action: str,
-    amount: int,
-    reason: str | None = None,
-) -> None:
-    async with aiosqlite.connect(_db_path) as db:
-        await db.execute(
-            "INSERT INTO history (timestamp, actor_id, target_id, action, amount, reason) "
+        cur = await db.execute(
+            "INSERT INTO sessions (guild_id, channel_id, host_id, company_name, max_players, start_time_utc) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (_now(), str(actor_id), str(target_id), action, amount, reason),
+            (str(guild_id), str(channel_id), str(host_id), company_name, max_players, start_time_utc.isoformat()),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def set_session_message(session_id: int, message_id: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "UPDATE sessions SET message_id = ? WHERE id = ?", (str(message_id), session_id)
         )
         await db.commit()
 
 
-async def get_history(user_id: int) -> list[dict]:
-    """Returns all history entries where actor or target is user_id, newest first."""
-    uid = str(user_id)
+async def get_session(session_id: int) -> dict | None:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_pending_sessions() -> list[dict]:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM sessions WHERE status = 'pending'") as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_due_sessions() -> list[dict]:
+    now = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(_db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM history WHERE actor_id = ? OR target_id = ? ORDER BY id DESC",
-            (uid, uid),
+            "SELECT * FROM sessions WHERE status = 'pending' AND start_time_utc <= ?", (now,)
         ) as cur:
             rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
 
-async def get_top(field: str, limit: int = 10, offset: int = 0) -> list[tuple[str, int]]:
-    """Returns (user_id, amount) sorted descending for 'pending' or 'paid'."""
+async def set_session_status(session_id: int, status: str) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute("UPDATE sessions SET status = ? WHERE id = ?", (status, session_id))
+        await db.commit()
+
+
+# --- Session players ---
+
+async def add_player(session_id: int, user_id: int) -> bool:
+    """Returns False if the user already joined."""
     async with aiosqlite.connect(_db_path) as db:
         async with db.execute(
-            f"SELECT user_id, {field} FROM wallets WHERE {field} > 0 "
-            f"ORDER BY {field} DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            "SELECT 1 FROM session_players WHERE session_id = ? AND user_id = ?",
+            (session_id, str(user_id)),
         ) as cur:
-            rows = await cur.fetchall()
-    return [(row[0], row[1]) for row in rows]
-
-
-async def count_top(field: str) -> int:
-    """Returns total number of users with field > 0."""
-    async with aiosqlite.connect(_db_path) as db:
-        async with db.execute(
-            f"SELECT COUNT(*) FROM wallets WHERE {field} > 0"
-        ) as cur:
-            row = await cur.fetchone()
-    return row[0]
-
-
-# --- Bot admins ---
-
-async def add_bot_admin(user_id: int, granted_by: int) -> bool:
-    """Returns False if already an admin."""
-    uid = str(user_id)
-    async with aiosqlite.connect(_db_path) as db:
-        async with db.execute(
-            "SELECT 1 FROM bot_admins WHERE user_id = ?", (uid,)
-        ) as cur:
-            exists = await cur.fetchone()
-        if exists:
-            return False
+            if await cur.fetchone():
+                return False
         await db.execute(
-            "INSERT INTO bot_admins (user_id, granted_by, granted_at) VALUES (?, ?, ?)",
-            (uid, str(granted_by), _now()),
+            "INSERT INTO session_players (session_id, user_id, joined_at) VALUES (?, ?, ?)",
+            (session_id, str(user_id), _now()),
         )
         await db.commit()
     return True
 
 
-async def remove_bot_admin(user_id: int) -> bool:
-    """Returns False if user was not an admin."""
-    uid = str(user_id)
+async def remove_player(session_id: int, user_id: int) -> bool:
+    """Returns False if the user hadn't joined."""
     async with aiosqlite.connect(_db_path) as db:
-        async with db.execute(
-            "SELECT 1 FROM bot_admins WHERE user_id = ?", (uid,)
-        ) as cur:
-            exists = await cur.fetchone()
-        if not exists:
-            return False
-        await db.execute("DELETE FROM bot_admins WHERE user_id = ?", (uid,))
+        cur = await db.execute(
+            "DELETE FROM session_players WHERE session_id = ? AND user_id = ?",
+            (session_id, str(user_id)),
+        )
         await db.commit()
-    return True
+    return cur.rowcount > 0
 
 
-async def user_is_bot_admin(user_id: int) -> bool:
-    uid = str(user_id)
+async def get_players(session_id: int) -> list[int]:
     async with aiosqlite.connect(_db_path) as db:
         async with db.execute(
-            "SELECT 1 FROM bot_admins WHERE user_id = ?", (uid,)
+            "SELECT user_id FROM session_players WHERE session_id = ?", (session_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+    return [int(r[0]) for r in rows]
+
+
+async def count_players(session_id: int) -> int:
+    async with aiosqlite.connect(_db_path) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM session_players WHERE session_id = ?", (session_id,)
         ) as cur:
             row = await cur.fetchone()
-    return row is not None
+    return row[0]
