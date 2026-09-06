@@ -1,25 +1,19 @@
 from datetime import datetime, timezone
 
-DATETIME_FORMAT = "%Y-%m-%d %H:%M"
 
-
-def parse_datetime_utc(text: str) -> datetime:
-    """Parses a 'YYYY-MM-DD HH:MM' string as UTC. Raises ValueError if malformed or not in the future."""
+def build_session_datetime(year: int, month: int, day: int, hour: int, minute: int) -> datetime:
+    """Builds a UTC datetime from components. Raises ValueError if invalid or not in the future."""
     try:
-        dt = datetime.strptime(text.strip(), DATETIME_FORMAT).replace(tzinfo=timezone.utc)
+        dt = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
     except ValueError:
-        raise ValueError("Date/time must be in the format YYYY-MM-DD HH:MM (UTC).")
+        raise ValueError("That date/time doesn't exist. Check the year, month, day, hour, and minute.")
     if dt <= datetime.now(timezone.utc):
         raise ValueError("Date/time must be in the future.")
     return dt
 
 
-def parse_max_players(text: str) -> int:
-    """Parses a positive integer. Raises ValueError otherwise."""
-    try:
-        value = int(text.strip())
-    except ValueError:
-        raise ValueError("Max players must be a whole number.")
+def validate_max_players(value: int) -> int:
+    """Raises ValueError if value isn't a positive number of players."""
     if value <= 0:
         raise ValueError("Max players must be greater than 0.")
     return value
@@ -37,3 +31,11 @@ def has_host_permission(
     if host_role_id is None:
         return False
     return host_role_id in member_role_ids
+
+
+def can_manage_session(is_administrator: bool, is_original_host: bool) -> bool:
+    return is_administrator or is_original_host
+
+
+def is_image_attachment(content_type: str | None) -> bool:
+    return bool(content_type) and content_type.startswith("image/")

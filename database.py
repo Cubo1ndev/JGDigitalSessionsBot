@@ -15,6 +15,9 @@ def set_path(path: str) -> None:
 
 async def init_db() -> None:
     async with aiosqlite.connect(_db_path) as db:
+        # WAL mode lets concurrent Join/Leave button clicks (each opening their own
+        # connection) read/write without blocking each other as easily.
+        await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id             INTEGER PRIMARY KEY,
@@ -25,9 +28,12 @@ async def init_db() -> None:
                 company_name   TEXT    NOT NULL,
                 max_players    INTEGER NOT NULL,
                 start_time_utc TEXT    NOT NULL,
-                status         TEXT    NOT NULL DEFAULT 'pending'
+                status         TEXT    NOT NULL DEFAULT 'pending',
+                description    TEXT,
+                logo_url       TEXT
             )
         """)
+        await _add_missing_columns(db, "sessions", {"description": "TEXT", "logo_url": "TEXT"})
         await db.execute("""
             CREATE TABLE IF NOT EXISTS session_players (
                 session_id INTEGER NOT NULL,
@@ -47,6 +53,15 @@ async def init_db() -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+async def _add_missing_columns(db: aiosqlite.Connection, table: str, columns: dict[str, str]) -> None:
+    """Adds any column in `columns` (name -> SQL type) missing from an already-existing table."""
+    async with db.execute(f"PRAGMA table_info({table})") as cur:
+        existing = {row[1] async for row in cur}
+    for name, sql_type in columns.items():
+        if name not in existing:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
 
 
 # --- Host roles ---
@@ -79,6 +94,8 @@ async def create_session(
     company_name: str,
     max_players: int,
     start_time_utc: datetime,
+    description: str | None = None,
+    logo_url: str | None = None,
 ) -> int:
     """Returns the new session's id (a random 9-digit number, not sequential)."""
     async with aiosqlite.connect(_db_path) as db:
@@ -87,8 +104,9 @@ async def create_session(
             try:
                 await db.execute(
                     "INSERT INTO sessions "
-                    "(id, guild_id, channel_id, host_id, company_name, max_players, start_time_utc) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(id, guild_id, channel_id, host_id, company_name, max_players, start_time_utc, "
+                    "description, logo_url) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         session_id,
                         str(guild_id),
@@ -97,6 +115,8 @@ async def create_session(
                         company_name,
                         max_players,
                         start_time_utc.isoformat(),
+                        description,
+                        logo_url,
                     ),
                 )
             except aiosqlite.IntegrityError:
@@ -129,6 +149,30 @@ async def get_pending_sessions() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def get_pending_sessions_for_guild(guild_id: int) -> list[dict]:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM sessions WHERE status = 'pending' AND guild_id = ? "
+            "ORDER BY start_time_utc ASC",
+            (str(guild_id),),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_active_sessions_for_guild(guild_id: int) -> list[dict]:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM sessions WHERE status = 'fired' AND guild_id = ? "
+            "ORDER BY start_time_utc ASC",
+            (str(guild_id),),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
 async def get_due_sessions() -> list[dict]:
     now = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(_db_path) as db:
@@ -151,16 +195,13 @@ async def set_session_status(session_id: int, status: str) -> None:
 async def add_player(session_id: int, user_id: int) -> bool:
     """Returns False if the user already joined."""
     async with aiosqlite.connect(_db_path) as db:
-        async with db.execute(
-            "SELECT 1 FROM session_players WHERE session_id = ? AND user_id = ?",
-            (session_id, str(user_id)),
-        ) as cur:
-            if await cur.fetchone():
-                return False
-        await db.execute(
-            "INSERT INTO session_players (session_id, user_id, joined_at) VALUES (?, ?, ?)",
-            (session_id, str(user_id), _now()),
-        )
+        try:
+            await db.execute(
+                "INSERT INTO session_players (session_id, user_id, joined_at) VALUES (?, ?, ?)",
+                (session_id, str(user_id), _now()),
+            )
+        except aiosqlite.IntegrityError:
+            return False
         await db.commit()
     return True
 

@@ -5,35 +5,30 @@ import pytest
 import session_logic
 
 
-def test_parse_datetime_utc_accepts_valid_future_date():
-    dt = session_logic.parse_datetime_utc("2099-01-01 20:00")
+def test_build_session_datetime_accepts_valid_future_date():
+    dt = session_logic.build_session_datetime(year=2099, month=1, day=1, hour=20, minute=0)
     assert dt == datetime(2099, 1, 1, 20, 0, tzinfo=timezone.utc)
 
 
-def test_parse_datetime_utc_rejects_bad_format():
+def test_build_session_datetime_rejects_invalid_calendar_date():
     with pytest.raises(ValueError):
-        session_logic.parse_datetime_utc("tomorrow at 8pm")
+        session_logic.build_session_datetime(year=2099, month=2, day=30, hour=20, minute=0)
 
 
-def test_parse_datetime_utc_rejects_past_date():
+def test_build_session_datetime_rejects_past_date():
     with pytest.raises(ValueError):
-        session_logic.parse_datetime_utc("2000-01-01 20:00")
+        session_logic.build_session_datetime(year=2000, month=1, day=1, hour=20, minute=0)
 
 
-def test_parse_max_players_accepts_positive_int():
-    assert session_logic.parse_max_players("10") == 10
+def test_validate_max_players_accepts_positive_int():
+    assert session_logic.validate_max_players(10) == 10
 
 
-def test_parse_max_players_rejects_non_numeric():
+def test_validate_max_players_rejects_zero_or_negative():
     with pytest.raises(ValueError):
-        session_logic.parse_max_players("ten")
-
-
-def test_parse_max_players_rejects_zero_or_negative():
+        session_logic.validate_max_players(0)
     with pytest.raises(ValueError):
-        session_logic.parse_max_players("0")
-    with pytest.raises(ValueError):
-        session_logic.parse_max_players("-5")
+        session_logic.validate_max_players(-5)
 
 
 def test_has_room_true_when_below_capacity():
@@ -66,3 +61,27 @@ def test_has_host_permission_missing_role_denied():
     assert session_logic.has_host_permission(
         is_administrator=False, member_role_ids={1, 3}, host_role_id=2
     ) is False
+
+
+def test_can_manage_session_allowed_for_original_host():
+    assert session_logic.can_manage_session(is_administrator=False, is_original_host=True) is True
+
+
+def test_can_manage_session_allowed_for_administrator():
+    assert session_logic.can_manage_session(is_administrator=True, is_original_host=False) is True
+
+
+def test_can_manage_session_denied_for_neither():
+    assert session_logic.can_manage_session(is_administrator=False, is_original_host=False) is False
+
+
+def test_is_image_attachment_true_for_image_content_type():
+    assert session_logic.is_image_attachment("image/png") is True
+
+
+def test_is_image_attachment_false_for_non_image_content_type():
+    assert session_logic.is_image_attachment("text/plain") is False
+
+
+def test_is_image_attachment_false_for_none():
+    assert session_logic.is_image_attachment(None) is False
