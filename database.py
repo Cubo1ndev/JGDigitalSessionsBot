@@ -1,5 +1,9 @@
+import random
 import aiosqlite
 from datetime import datetime, timezone
+
+MIN_SESSION_ID = 100_000_000
+MAX_SESSION_ID = 999_999_999
 
 _db_path: str = ""
 
@@ -13,7 +17,7 @@ async def init_db() -> None:
     async with aiosqlite.connect(_db_path) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                id             INTEGER PRIMARY KEY,
                 guild_id       TEXT    NOT NULL,
                 channel_id     TEXT    NOT NULL,
                 message_id     TEXT,
@@ -38,17 +42,6 @@ async def init_db() -> None:
                 role_id  TEXT NOT NULL
             )
         """)
-        # Offset the id sequence so session ids read as long ids (100000001, ...)
-        # instead of small ones (1, 2, ...).
-        await db.execute(
-            "INSERT INTO sqlite_sequence (name, seq) "
-            "SELECT 'sessions', 100000000 "
-            "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'sessions')"
-        )
-        await db.execute(
-            "UPDATE sqlite_sequence SET seq = 100000000 "
-            "WHERE name = 'sessions' AND seq < 100000000"
-        )
         await db.commit()
 
 
@@ -87,15 +80,29 @@ async def create_session(
     max_players: int,
     start_time_utc: datetime,
 ) -> int:
-    """Returns the new session's id."""
+    """Returns the new session's id (a random 9-digit number, not sequential)."""
     async with aiosqlite.connect(_db_path) as db:
-        cur = await db.execute(
-            "INSERT INTO sessions (guild_id, channel_id, host_id, company_name, max_players, start_time_utc) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (str(guild_id), str(channel_id), str(host_id), company_name, max_players, start_time_utc.isoformat()),
-        )
-        await db.commit()
-        return cur.lastrowid
+        while True:
+            session_id = random.randint(MIN_SESSION_ID, MAX_SESSION_ID)
+            try:
+                await db.execute(
+                    "INSERT INTO sessions "
+                    "(id, guild_id, channel_id, host_id, company_name, max_players, start_time_utc) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        session_id,
+                        str(guild_id),
+                        str(channel_id),
+                        str(host_id),
+                        company_name,
+                        max_players,
+                        start_time_utc.isoformat(),
+                    ),
+                )
+            except aiosqlite.IntegrityError:
+                continue
+            await db.commit()
+            return session_id
 
 
 async def set_session_message(session_id: int, message_id: int) -> None:

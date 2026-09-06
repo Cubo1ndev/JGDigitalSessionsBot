@@ -50,7 +50,7 @@ def test_session_lifecycle(tmp_path):
     asyncio.run(run())
 
 
-def test_session_ids_start_at_a_large_offset(tmp_path):
+def test_create_session_id_is_a_large_random_number(tmp_path):
     db_path = str(tmp_path / "test.db")
 
     async def run():
@@ -61,8 +61,29 @@ def test_session_ids_start_at_a_large_offset(tmp_path):
         first_id = await database.create_session(1, 2, 3, "Co", 5, future)
         second_id = await database.create_session(1, 2, 3, "Co", 5, future)
 
-        assert first_id >= 100_000_000
-        assert second_id == first_id + 1
+        assert 100_000_000 <= first_id <= 999_999_999
+        assert 100_000_000 <= second_id <= 999_999_999
+        assert first_id != second_id
+
+    asyncio.run(run())
+
+
+def test_create_session_retries_on_id_collision(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+
+    async def run():
+        database.set_path(db_path)
+        await database.init_db()
+
+        rolls = iter([111111111, 111111111, 222222222])
+        monkeypatch.setattr(database.random, "randint", lambda a, b: next(rolls))
+
+        future = datetime.now(timezone.utc) + timedelta(days=1)
+        first_id = await database.create_session(1, 2, 3, "Co", 5, future)
+        second_id = await database.create_session(1, 2, 3, "Co", 5, future)
+
+        assert first_id == 111111111
+        assert second_id == 222222222  # skipped the roll that collided with first_id
 
     asyncio.run(run())
 
