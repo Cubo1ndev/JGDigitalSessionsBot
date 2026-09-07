@@ -31,6 +31,13 @@ def test_validate_max_players_rejects_zero_or_negative():
         session_logic.validate_max_players(-5)
 
 
+def test_validate_max_players_rejects_below_current_count():
+    with pytest.raises(ValueError):
+        session_logic.validate_max_players(4, current_count=5)
+    assert session_logic.validate_max_players(5, current_count=5) == 5
+    assert session_logic.validate_max_players(6, current_count=5) == 6
+
+
 def test_has_room_true_when_below_capacity():
     assert session_logic.has_room(current_count=3, max_players=5) is True
 
