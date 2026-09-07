@@ -12,10 +12,14 @@ def build_session_datetime(year: int, month: int, day: int, hour: int, minute: i
     return dt
 
 
-def validate_max_players(value: int) -> int:
-    """Raises ValueError if value isn't a positive number of players."""
+def validate_max_players(value: int, current_count: int = 0) -> int:
+    """Raises ValueError if value isn't a positive number of players or is lower than current_count."""
     if value <= 0:
         raise ValueError("Max players must be greater than 0.")
+    if value < current_count:
+        raise ValueError(
+            f"Cannot set player limit to {value} because {current_count} player(s) have already joined."
+        )
     return value
 
 

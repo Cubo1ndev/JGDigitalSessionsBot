@@ -28,22 +28,52 @@ STATUS_LABELS = {
 }
 
 
-def build_session_embed(session: dict, player_count: int) -> discord.Embed:
+def build_session_embed(session: dict, player_ids: list[int] | None = None) -> discord.Embed:
+    if player_ids is None:
+        player_ids = []
     start_dt = datetime.fromisoformat(session["start_time_utc"])
     status = session["status"]
+    player_count = len(player_ids)
+    max_players = session["max_players"]
 
     embed = discord.Embed(
         title=f"🚌 {session['company_name']}",
-        description=f"Hosted by <@{session['host_id']}>",
         color=STATUS_COLORS[status],
     )
+
     if session.get("description"):
-        embed.add_field(name="About", value=session["description"], inline=False)
-    embed.add_field(name="Players", value=f"{player_count}/{session['max_players']}", inline=True)
+        embed.description = session["description"]
+
+    embed.add_field(name="👑 Host", value=f"<@{session['host_id']}>", inline=True)
+
+    server_val = session.get("server_name") if session.get("server_name") else "Not specified"
+    embed.add_field(name="🌐 Server", value=server_val, inline=True)
+
     if status == "pending":
-        embed.add_field(name="Starts", value=f"<t:{int(start_dt.timestamp())}:R>", inline=True)
+        timestamp = int(start_dt.timestamp())
+        embed.add_field(name="⏰ Starts", value=f"<t:{timestamp}:R> (<t:{timestamp}:F>)", inline=False)
     else:
-        embed.add_field(name="Status", value=STATUS_LABELS[status], inline=True)
+        embed.add_field(name="📌 Status", value=STATUS_LABELS[status], inline=False)
+
+    if player_ids:
+        mentions = [f"<@{uid}>" for uid in player_ids]
+        player_text = "\n".join(mentions)
+        if len(player_text) > 1000:
+            truncated = []
+            current_len = 0
+            for mention in mentions:
+                if current_len + len(mention) + 15 > 950:
+                    remaining = len(mentions) - len(truncated)
+                    truncated.append(f"...and {remaining} more")
+                    break
+                truncated.append(mention)
+                current_len += len(mention) + 1
+            player_text = "\n".join(truncated)
+    else:
+        player_text = "*No players joined yet*"
+
+    embed.add_field(name=f"👥 Players ({player_count}/{max_players})", value=player_text, inline=False)
+
     if session.get("logo_url"):
         embed.set_thumbnail(url=session["logo_url"])
     embed.set_footer(text=f"Session #{session['id']}")
@@ -51,16 +81,27 @@ def build_session_embed(session: dict, player_count: int) -> discord.Embed:
 
 
 def build_start_dm_embed(session: dict) -> discord.Embed:
+    server_text = session.get("server_name") or "Not specified"
+    description = (
+        "The session is about to begin!\n\n"
+        f"• **Company:** {session['company_name']}\n"
+        f"• **Server:** {server_text}\n\n"
+        "**How to join:**\n"
+        "1. Open the game.\n"
+        "2. In the main menu, click **Servers**.\n"
+    )
+    if session.get("server_name"):
+        description += (
+            f"3. Search for server: **\"{session['server_name']}\"**\n"
+            f"4. Look for company: **\"{session['company_name']}\"**\n\n"
+        )
+    else:
+        description += f"3. Search for company: **\"{session['company_name']}\"**\n\n"
+    description += "Have fun!"
+
     embed = discord.Embed(
         title="🚌 Session Starting",
-        description=(
-            "The session is about to begin!\n\n"
-            "Follow the steps below to join:\n"
-            "1. Open the game.\n"
-            "2. In the main menu, click **Servers**.\n"
-            f"3. Search for **\"{session['company_name']}\"**.\n\n"
-            "Have fun!"
-        ),
+        description=description,
         color=GREEN,
     )
     if session.get("logo_url"):
@@ -69,12 +110,138 @@ def build_start_dm_embed(session: dict) -> discord.Embed:
     return embed
 
 
+class EditServerModal(discord.ui.Modal, title="Change Server Name"):
+    def __init__(self, session_id: int, bot: commands.Bot) -> None:
+        super().__init__()
+        self.session_id = session_id
+        self.bot = bot
+
+    server_name = discord.ui.TextInput(
+        label="Server Name / Location",
+        placeholder="Enter server name (e.g. US East - Server 1)",
+        required=True,
+        max_length=100,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        session = await database.get_session(self.session_id)
+        if session is None:
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
+        if not can_manage_session(
+            interaction.user.guild_permissions.administrator,
+            interaction.user.id == int(session["host_id"]),
+        ):
+            await interaction.response.send_message(
+                "Only the host or an administrator can edit this session.", ephemeral=True
+            )
+            return
+
+        new_server = self.server_name.value.strip()
+        await database.update_session_server_name(self.session_id, new_server)
+        updated_session = await database.get_session(self.session_id)
+
+        cog = self.bot.get_cog("session")
+        if cog:
+            status = updated_session["status"]
+            view = SessionView(self.session_id) if status == "pending" else None
+            await cog._update_message(updated_session, status, view)
+
+        await interaction.response.send_message(
+            f"✅ Server location updated to **\"{new_server}\"** for session #{self.session_id}.",
+            ephemeral=True,
+        )
+
+
+class EditLimitModal(discord.ui.Modal, title="Change Player Limit"):
+    def __init__(self, session_id: int, bot: commands.Bot) -> None:
+        super().__init__()
+        self.session_id = session_id
+        self.bot = bot
+
+    max_players_input = discord.ui.TextInput(
+        label="Maximum Players",
+        placeholder="Enter new player limit",
+        required=True,
+        max_length=5,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        session = await database.get_session(self.session_id)
+        if session is None:
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
+        if not can_manage_session(
+            interaction.user.guild_permissions.administrator,
+            interaction.user.id == int(session["host_id"]),
+        ):
+            await interaction.response.send_message(
+                "Only the host or an administrator can edit this session.", ephemeral=True
+            )
+            return
+
+        try:
+            val = int(self.max_players_input.value.strip())
+            current_count = await database.count_players(self.session_id)
+            val = validate_max_players(val, current_count=current_count)
+        except ValueError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+
+        await database.update_session_max_players(self.session_id, val)
+        updated_session = await database.get_session(self.session_id)
+
+        cog = self.bot.get_cog("session")
+        if cog:
+            status = updated_session["status"]
+            view = SessionView(self.session_id) if status == "pending" else None
+            await cog._update_message(updated_session, status, view)
+
+        await interaction.response.send_message(
+            f"✅ Player limit updated to **{val}** for session #{self.session_id}.",
+            ephemeral=True,
+        )
+
+
+class HostSettingsControlView(discord.ui.View):
+    def __init__(self, session_id: int, bot: commands.Bot) -> None:
+        super().__init__(timeout=180)
+        self.session_id = session_id
+        self.bot = bot
+
+    @discord.ui.button(label="🌐 Change Server", style=discord.ButtonStyle.blurple)
+    async def change_server_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        modal = EditServerModal(self.session_id, self.bot)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="👥 Change Player Limit", style=discord.ButtonStyle.blurple)
+    async def change_limit_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        modal = EditLimitModal(self.session_id, self.bot)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="❌ Cancel Session", style=discord.ButtonStyle.red)
+    async def cancel_session_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        session = await database.get_session(self.session_id)
+        if session is None or session["status"] != "pending":
+            await interaction.response.send_message("That session is no longer pending.", ephemeral=True)
+            return
+
+        cog = self.bot.get_cog("session")
+        if cog:
+            await interaction.response.defer(ephemeral=True)
+            await cog._cancel_session_internal(self.session_id)
+            await interaction.followup.send(f"Session #{self.session_id} cancelled.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Could not perform action.", ephemeral=True)
+
+
 class SessionView(discord.ui.View):
     def __init__(self, session_id: int) -> None:
         super().__init__(timeout=None)
         self.session_id = session_id
         self.join_button.custom_id = f"session_join:{session_id}"
         self.leave_button.custom_id = f"session_leave:{session_id}"
+        self.settings_button.custom_id = f"session_settings:{session_id}"
 
     @discord.ui.button(label="Join", style=discord.ButtonStyle.green)
     async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -90,7 +257,8 @@ class SessionView(discord.ui.View):
         if not added:
             await interaction.response.send_message("You already joined this session.", ephemeral=True)
             return
-        embed = build_session_embed(session, count + 1)
+        player_ids = await database.get_players(self.session_id)
+        embed = build_session_embed(session, player_ids)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="Leave", style=discord.ButtonStyle.red)
@@ -103,9 +271,37 @@ class SessionView(discord.ui.View):
         if not removed:
             await interaction.response.send_message("You hadn't joined this session.", ephemeral=True)
             return
-        count = await database.count_players(self.session_id)
-        embed = build_session_embed(session, count)
+        player_ids = await database.get_players(self.session_id)
+        embed = build_session_embed(session, player_ids)
         await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="⚙️ Host Settings", style=discord.ButtonStyle.grey)
+    async def settings_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        session = await database.get_session(self.session_id)
+        if session is None:
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
+        is_admin = interaction.user.guild_permissions.administrator
+        is_host = interaction.user.id == int(session["host_id"])
+        if not can_manage_session(is_admin, is_host):
+            await interaction.response.send_message(
+                "Only the host or an administrator can access host settings for this session.",
+                ephemeral=True,
+            )
+            return
+
+        view = HostSettingsControlView(self.session_id, interaction.client)
+        embed = discord.Embed(
+            title=f"⚙️ Host Controls — Session #{self.session_id}",
+            description=(
+                f"**Company:** {session['company_name']}\n"
+                f"**Server:** {session.get('server_name') or 'Not specified'}\n"
+                f"**Player Limit:** {session['max_players']}\n\n"
+                "Select an option below to update session settings or cancel the session."
+            ),
+            color=BLURPLE,
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 class Session(commands.GroupCog, name="session"):
@@ -134,6 +330,7 @@ class Session(commands.GroupCog, name="session"):
         day="Start day, 1-31 (UTC)",
         hour="Start hour, 0-23 (UTC)",
         minute="Start minute, 0-59 (UTC)",
+        server_name="Optional server name or location where the session will take place",
         description="Optional description shown on the session card",
         logo="Optional logo image shown on the session card",
     )
@@ -148,6 +345,7 @@ class Session(commands.GroupCog, name="session"):
         day: Range[int, 1, 31],
         hour: Range[int, 0, 23],
         minute: Range[int, 0, 59],
+        server_name: str | None = None,
         description: str | None = None,
         logo: discord.Attachment | None = None,
     ) -> None:
@@ -171,10 +369,11 @@ class Session(commands.GroupCog, name="session"):
             start_time_utc=start_dt,
             description=description,
             logo_url=logo.url if logo else None,
+            server_name=server_name,
         )
         session = await database.get_session(session_id)
         view = SessionView(session_id)
-        embed = build_session_embed(session, 0)
+        embed = build_session_embed(session, [])
         await interaction.response.send_message(embed=embed, view=view)
         message = await interaction.original_response()
         await database.set_session_message(session_id, message.id)
@@ -182,6 +381,27 @@ class Session(commands.GroupCog, name="session"):
             f"✅ Session **#{session_id}** created. Use `/session cancel {session_id}` to cancel it.",
             ephemeral=True,
         )
+
+    async def _cancel_session_internal(self, session_id: int) -> None:
+        session = await database.get_session(session_id)
+        if session is None or session["status"] != "pending":
+            return
+
+        await database.set_session_status(session_id, "cancelled")
+        player_ids = await database.get_players(session_id)
+        cancel_embed = discord.Embed(
+            title="❌ Session Cancelled",
+            description=f"The session **{session['company_name']}** (Session #{session_id}) has been cancelled by the host.",
+            color=RED,
+        )
+        for user_id in player_ids:
+            try:
+                user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+                await user.send(embed=cancel_embed)
+            except discord.Forbidden:
+                pass
+
+        await self._update_message(session, "cancelled", view=None)
 
     @app_commands.command(name="cancel", description="Cancel a pending session")
     @app_commands.describe(session_id="The ID of the session to cancel")
@@ -203,9 +423,67 @@ class Session(commands.GroupCog, name="session"):
             return
 
         await interaction.response.defer(ephemeral=True)
-        await database.set_session_status(session_id, "cancelled")
-        await self._update_message(session, "cancelled", view=None)
+        await self._cancel_session_internal(session_id)
         await interaction.followup.send(f"Session #{session_id} cancelled.", ephemeral=True)
+
+    @app_commands.command(name="setlimit", description="Change the player limit for a session (host/admin only)")
+    @app_commands.describe(session_id="The ID of the session", max_players="New maximum number of players")
+    async def setlimit(self, interaction: discord.Interaction, session_id: int, max_players: int) -> None:
+        session = await database.get_session(session_id)
+        if session is None or session["guild_id"] != str(interaction.guild_id):
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
+        if session["status"] != "pending":
+            await interaction.response.send_message("Can only change limit for pending sessions.", ephemeral=True)
+            return
+        if not can_manage_session(
+            is_administrator=interaction.user.guild_permissions.administrator,
+            is_original_host=interaction.user.id == int(session["host_id"]),
+        ):
+            await interaction.response.send_message(
+                "Only the host or an administrator can edit this session.", ephemeral=True
+            )
+            return
+
+        count = await database.count_players(session_id)
+        try:
+            val = validate_max_players(max_players, current_count=count)
+        except ValueError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+
+        await database.update_session_max_players(session_id, val)
+        updated_session = await database.get_session(session_id)
+        await self._update_message(updated_session, updated_session["status"], view=SessionView(session_id))
+        await interaction.response.send_message(
+            f"✅ Player limit updated to **{val}** for session #{session_id}.", ephemeral=True
+        )
+
+    @app_commands.command(name="setserver", description="Change the server location for a session at any time (host/admin only)")
+    @app_commands.describe(session_id="The ID of the session", server_name="New server name or location")
+    async def setserver(self, interaction: discord.Interaction, session_id: int, server_name: str) -> None:
+        session = await database.get_session(session_id)
+        if session is None or session["guild_id"] != str(interaction.guild_id):
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
+        if not can_manage_session(
+            is_administrator=interaction.user.guild_permissions.administrator,
+            is_original_host=interaction.user.id == int(session["host_id"]),
+        ):
+            await interaction.response.send_message(
+                "Only the host or an administrator can edit this session.", ephemeral=True
+            )
+            return
+
+        new_server = server_name.strip()
+        await database.update_session_server_name(session_id, new_server)
+        updated_session = await database.get_session(session_id)
+        status = updated_session["status"]
+        view = SessionView(session_id) if status == "pending" else None
+        await self._update_message(updated_session, status, view)
+        await interaction.response.send_message(
+            f"✅ Server location updated to **\"{new_server}\"** for session #{session_id}.", ephemeral=True
+        )
 
     @app_commands.command(name="players", description="View who has joined a session (host/admin only)")
     @app_commands.describe(session_id="The ID of the session to view")
@@ -261,8 +539,8 @@ class Session(commands.GroupCog, name="session"):
         if session is None or session["guild_id"] != str(interaction.guild_id):
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
-        count = await database.count_players(session_id)
-        await interaction.response.send_message(embed=build_session_embed(session, count), ephemeral=True)
+        player_ids = await database.get_players(session_id)
+        await interaction.response.send_message(embed=build_session_embed(session, player_ids), ephemeral=True)
 
     @app_commands.command(name="show", description="Repost a session's Join/Leave message for everyone")
     @app_commands.describe(session_id="The ID of the session to show")
@@ -271,9 +549,9 @@ class Session(commands.GroupCog, name="session"):
         if session is None or session["guild_id"] != str(interaction.guild_id):
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
-        count = await database.count_players(session_id)
+        player_ids = await database.get_players(session_id)
         view = SessionView(session_id) if session["status"] == "pending" else None
-        await interaction.response.send_message(embed=build_session_embed(session, count), view=view)
+        await interaction.response.send_message(embed=build_session_embed(session, player_ids), view=view)
 
     @app_commands.command(name="kick", description="Remove a player from a session (host/admin only)")
     @app_commands.describe(session_id="The ID of the session", user="The player to remove")
@@ -405,11 +683,13 @@ class Session(commands.GroupCog, name="session"):
                 name="Host",
                 value=(
                     "`/session host` — host a new session\n"
-                    "`/session cancel <id>` — cancel a pending session you host\n"
+                    "`/session cancel <id>` — cancel a pending session\n"
+                    "`/session setlimit <id> <limit>` — change player limit\n"
+                    "`/session setserver <id> <server>` — change server location\n"
                     "`/session start <id>` — force a pending session to start now\n"
                     "`/session end <id>` — end an active session\n"
-                    "`/session players <id>` — view who joined a session you host\n"
-                    "`/session kick <id> <user>` — remove a player from a session you host"
+                    "`/session players <id>` — view who joined a session\n"
+                    "`/session kick <id> <user>` — remove a player from a session"
                 ),
                 inline=False,
             )

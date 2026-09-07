@@ -145,12 +145,34 @@ def test_create_session_stores_description_and_logo_url(tmp_path):
 
         future = datetime.now(timezone.utc) + timedelta(days=1)
         session_id = await database.create_session(
-            1, 2, 3, "Co", 5, future, description="Come ride with us!", logo_url="https://x/logo.png"
+            1, 2, 3, "Co", 5, future, description="Come ride with us!", logo_url="https://x/logo.png", server_name="US East - Server 1"
         )
         session = await database.get_session(session_id)
 
         assert session["description"] == "Come ride with us!"
         assert session["logo_url"] == "https://x/logo.png"
+        assert session["server_name"] == "US East - Server 1"
+
+    asyncio.run(run())
+
+
+def test_update_session_server_name_and_max_players(tmp_path):
+    db_path = str(tmp_path / "test.db")
+
+    async def run():
+        database.set_path(db_path)
+        await database.init_db()
+
+        future = datetime.now(timezone.utc) + timedelta(days=1)
+        session_id = await database.create_session(1, 2, 3, "Co", 5, future)
+
+        await database.update_session_server_name(session_id, "Server Alpha")
+        session = await database.get_session(session_id)
+        assert session["server_name"] == "Server Alpha"
+
+        await database.update_session_max_players(session_id, 12)
+        session = await database.get_session(session_id)
+        assert session["max_players"] == 12
 
     asyncio.run(run())
 

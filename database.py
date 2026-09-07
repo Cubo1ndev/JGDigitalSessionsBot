@@ -30,10 +30,11 @@ async def init_db() -> None:
                 start_time_utc TEXT    NOT NULL,
                 status         TEXT    NOT NULL DEFAULT 'pending',
                 description    TEXT,
-                logo_url       TEXT
+                logo_url       TEXT,
+                server_name    TEXT
             )
         """)
-        await _add_missing_columns(db, "sessions", {"description": "TEXT", "logo_url": "TEXT"})
+        await _add_missing_columns(db, "sessions", {"description": "TEXT", "logo_url": "TEXT", "server_name": "TEXT"})
         await db.execute("""
             CREATE TABLE IF NOT EXISTS session_players (
                 session_id INTEGER NOT NULL,
@@ -96,6 +97,7 @@ async def create_session(
     start_time_utc: datetime,
     description: str | None = None,
     logo_url: str | None = None,
+    server_name: str | None = None,
 ) -> int:
     """Returns the new session's id (a random 9-digit number, not sequential)."""
     async with aiosqlite.connect(_db_path) as db:
@@ -105,8 +107,8 @@ async def create_session(
                 await db.execute(
                     "INSERT INTO sessions "
                     "(id, guild_id, channel_id, host_id, company_name, max_players, start_time_utc, "
-                    "description, logo_url) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "description, logo_url, server_name) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         session_id,
                         str(guild_id),
@@ -117,6 +119,7 @@ async def create_session(
                         start_time_utc.isoformat(),
                         description,
                         logo_url,
+                        server_name,
                     ),
                 )
             except aiosqlite.IntegrityError:
@@ -187,6 +190,22 @@ async def get_due_sessions() -> list[dict]:
 async def set_session_status(session_id: int, status: str) -> None:
     async with aiosqlite.connect(_db_path) as db:
         await db.execute("UPDATE sessions SET status = ? WHERE id = ?", (status, session_id))
+        await db.commit()
+
+
+async def update_session_max_players(session_id: int, max_players: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "UPDATE sessions SET max_players = ? WHERE id = ?", (max_players, session_id)
+        )
+        await db.commit()
+
+
+async def update_session_server_name(session_id: int, server_name: str | None) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "UPDATE sessions SET server_name = ? WHERE id = ?", (server_name, session_id)
+        )
         await db.commit()
 
 
