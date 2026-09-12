@@ -606,9 +606,9 @@ class Session(commands.GroupCog, name="session"):
             f"Removed {user.mention} from session #{session_id}.", ephemeral=True
         )
 
-    @app_commands.command(name="forcejoin", description="Add a player to a pending session (host/admin only)")
+    @app_commands.command(name="add", description="Add a player to a pending session (host/admin only)")
     @app_commands.describe(session_id="The ID of the session", user="The player to add")
-    async def forcejoin(self, interaction: discord.Interaction, session_id: int, user: discord.Member) -> None:
+    async def add(self, interaction: discord.Interaction, session_id: int, user: discord.Member) -> None:
         session = await database.get_session(session_id)
         if session is None or session["guild_id"] != str(interaction.guild_id):
             await interaction.response.send_message("Session not found.", ephemeral=True)
@@ -752,7 +752,7 @@ class Session(commands.GroupCog, name="session"):
                     "`/session end <id>` — end an active session\n"
                     "`/session players <id>` — view who joined a session\n"
                     "`/session kick <id> <user>` — remove a player from a session\n"
-                    "`/session forcejoin <id> <user>` — add a player to a session"
+                    "`/session add <id> <user>` — add a player to a session"
                 ),
                 inline=False,
             )
