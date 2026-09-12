@@ -4,9 +4,11 @@ from discord.ext import commands
 import config
 import database
 from cogs.sessions import SessionView
+from cogs.suggestions import SuggestionVoteView, DuplicateReportView
 
 COGS = [
     "cogs.sessions",
+    "cogs.suggestions",
 ]
 
 intents = discord.Intents.default()
@@ -26,19 +28,20 @@ class Bot(commands.Bot):
         for session in await database.get_pending_sessions():
             self.add_view(SessionView(session["id"]))
 
-        if config.GUILD_ID:
-            guild = discord.Object(id=config.GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-        else:
-            await self.tree.sync()
+        for thread_id in await database.get_all_open_suggestion_threads():
+            upvotes, downvotes = await database.get_suggestion_vote_counts(thread_id)
+            self.add_view(SuggestionVoteView(thread_id, upvotes, downvotes))
+
+        for report in await database.get_pending_duplicate_reports():
+            self.add_view(DuplicateReportView(report["id"]))
+
+        await self.tree.sync()
 
     async def on_ready(self) -> None:
         await self.change_presence(
             activity=discord.CustomActivity(name="Hosting Sessions 24/7")
         )
         print(f"Logged in as {self.user} (ID: {self.user.id})")
-        print(f"Guild ID: {config.GUILD_ID or 'global'}")
         print("------")
 
 
