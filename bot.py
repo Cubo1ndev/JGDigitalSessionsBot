@@ -35,7 +35,7 @@ class Bot(commands.Bot):
 
     async def on_ready(self) -> None:
         await self.change_presence(
-            activity=discord.CustomActivity(name="Hosting bus sessions")
+            activity=discord.CustomActivity(name="Hosting Sessions 24/7")
         )
         print(f"Logged in as {self.user} (ID: {self.user.id})")
         print(f"Guild ID: {config.GUILD_ID or 'global'}")
