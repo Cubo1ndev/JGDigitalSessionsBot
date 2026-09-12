@@ -18,6 +18,7 @@ from session_logic import (
 )
 
 GREEN = discord.Color.green()
+ORANGE = discord.Color.orange()
 BLURPLE = discord.Color.blurple()
 RED = discord.Color.red()
 GREY = discord.Color.greyple()
@@ -47,7 +48,7 @@ def build_session_embed(session: dict, player_ids: list[int] | None = None) -> d
     max_players = session["max_players"]
 
     embed = discord.Embed(
-        title=f"🚌 {session['company_name']}",
+        title=f"{session['company_name']} - Hosted by <@{session['host_id']}>",
         color=STATUS_COLORS[status],
     )
 
@@ -92,6 +93,7 @@ def build_start_dm_embed(session: dict) -> discord.Embed:
         "The session is about to begin!\n\n"
         f"• **Company:** {session['company_name']}\n"
         f"• **Server:** {server_text}\n\n"
+        f"**Session details:** {session.get('description') or 'No additional details provided.'}\n\n"
         "**How to join:**\n"
         "1. Open the game.\n"
         "2. In the main menu, click **Servers**.\n"
@@ -108,7 +110,7 @@ def build_start_dm_embed(session: dict) -> discord.Embed:
     embed = discord.Embed(
         title="SESSION STARTING",
         description=description,
-        color=GREEN,
+        color=ORANGE,
     )
     if session.get("logo_url"):
         embed.set_thumbnail(url=session["logo_url"])
@@ -122,9 +124,10 @@ def build_reminder_dm_embed(session: dict) -> discord.Embed:
         title="SESSION STARTING SOON",
         description=(
             f"Your **{session['company_name']}** session starts <t:{timestamp}:R>.\n\n"
+            f"**Session details:** {session.get('description') or 'No additional details provided.'}\n\n"
             "You will receive another message shortly with instructions on how to join."
         ),
-        color=discord.Color.gold(),
+        color=ORANGE,
     )
     if session.get("logo_url"):
         embed.set_thumbnail(url=session["logo_url"])
@@ -353,7 +356,7 @@ class Session(commands.GroupCog, name="session"):
         hour="Start hour, 0-23 (UTC)",
         minute="Start minute, 0-59 (UTC)",
         server_name="Optional server name or location where the session will take place",
-        description="Optional description shown on the session card",
+        description="What players should know, such as roleplay or construction details",
         logo="Optional logo image shown on the session card",
     )
     @require_host_role()
@@ -367,8 +370,8 @@ class Session(commands.GroupCog, name="session"):
         day: Range[int, 1, 31],
         hour: Range[int, 0, 23],
         minute: Range[int, 0, 59],
+        description: str,
         server_name: str | None = None,
-        description: str | None = None,
         logo: discord.Attachment | None = None,
     ) -> None:
         try:
