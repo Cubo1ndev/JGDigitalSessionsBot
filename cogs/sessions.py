@@ -1,3 +1,5 @@
+import logging
+
 import discord
 from discord import app_commands
 from discord.app_commands import Range
@@ -20,6 +22,7 @@ BLURPLE = discord.Color.blurple()
 RED = discord.Color.red()
 GREY = discord.Color.greyple()
 FOOTER_TEXT = "Provided with ❤️by JustGames Digital Team."
+logger = logging.getLogger(__name__)
 
 STATUS_COLORS = {"pending": GREEN, "fired": BLURPLE, "ended": GREY, "cancelled": RED}
 STATUS_LABELS = {
@@ -757,24 +760,33 @@ class Session(commands.GroupCog, name="session"):
         embed = build_session_embed({**session, "status": status}, count)
         await message.edit(embed=embed, view=view)
 
-    async def _send_session_dm(self, session: dict, embed: discord.Embed) -> None:
+    async def _send_session_dm(self, session: dict, embed: discord.Embed) -> bool:
         player_ids = await database.get_players(session["id"])
+        if not player_ids:
+            return False
+
+        sent = False
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
                 await user.send(embed=embed)
             except discord.Forbidden:
-                pass
+                logger.warning("Cannot DM user %s for session %s", user_id, session["id"])
+            except discord.HTTPException:
+                logger.exception("Discord rejected DM for user %s in session %s", user_id, session["id"])
+            else:
+                sent = True
+        return sent
 
     async def _send_reminder_dm(self, session: dict) -> None:
-        await self._send_session_dm(session, build_reminder_dm_embed(session))
-        await database.mark_session_reminder_sent(session["id"])
-        session["reminder_sent"] = 1
+        if await self._send_session_dm(session, build_reminder_dm_embed(session)):
+            await database.mark_session_reminder_sent(session["id"])
+            session["reminder_sent"] = 1
 
     async def _send_start_dm(self, session: dict) -> None:
-        await self._send_session_dm(session, build_start_dm_embed(session))
-        await database.mark_session_start_dm_sent(session["id"])
-        session["start_dm_sent"] = 1
+        if await self._send_session_dm(session, build_start_dm_embed(session)):
+            await database.mark_session_start_dm_sent(session["id"])
+            session["start_dm_sent"] = 1
 
     async def _fire_session(self, session: dict) -> None:
         if not session.get("start_dm_sent"):
@@ -786,15 +798,18 @@ class Session(commands.GroupCog, name="session"):
     async def check_due_sessions(self) -> None:
         now = datetime.now(timezone.utc)
         for session in await database.get_pending_sessions():
-            start_dt = datetime.fromisoformat(session["start_time_utc"])
-            seconds_until_start = (start_dt - now).total_seconds()
+            try:
+                start_dt = datetime.fromisoformat(session["start_time_utc"])
+                seconds_until_start = (start_dt - now).total_seconds()
 
-            if not session.get("reminder_sent") and seconds_until_start <= timedelta(minutes=30).total_seconds():
-                await self._send_reminder_dm(session)
-            if not session.get("start_dm_sent") and seconds_until_start <= timedelta(minutes=5).total_seconds():
-                await self._send_start_dm(session)
-            if seconds_until_start <= 0:
-                await self._fire_session(session)
+                if not session.get("reminder_sent") and seconds_until_start <= timedelta(minutes=30).total_seconds():
+                    await self._send_reminder_dm(session)
+                if not session.get("start_dm_sent") and seconds_until_start <= timedelta(minutes=5).total_seconds():
+                    await self._send_start_dm(session)
+                if seconds_until_start <= 0:
+                    await self._fire_session(session)
+            except Exception:
+                logger.exception("Failed to process session %s notifications", session.get("id"))
 
     @check_due_sessions.before_loop
     async def before_check_due_sessions(self) -> None:
