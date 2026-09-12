@@ -31,10 +31,18 @@ async def init_db() -> None:
                 status         TEXT    NOT NULL DEFAULT 'pending',
                 description    TEXT,
                 logo_url       TEXT,
-                server_name    TEXT
+                server_name    TEXT,
+                reminder_sent  INTEGER NOT NULL DEFAULT 0,
+                start_dm_sent  INTEGER NOT NULL DEFAULT 0
             )
         """)
-        await _add_missing_columns(db, "sessions", {"description": "TEXT", "logo_url": "TEXT", "server_name": "TEXT"})
+        await _add_missing_columns(db, "sessions", {
+            "description": "TEXT",
+            "logo_url": "TEXT",
+            "server_name": "TEXT",
+            "reminder_sent": "INTEGER NOT NULL DEFAULT 0",
+            "start_dm_sent": "INTEGER NOT NULL DEFAULT 0",
+        })
         await db.execute("""
             CREATE TABLE IF NOT EXISTS session_players (
                 session_id INTEGER NOT NULL,
@@ -190,6 +198,22 @@ async def get_due_sessions() -> list[dict]:
 async def set_session_status(session_id: int, status: str) -> None:
     async with aiosqlite.connect(_db_path) as db:
         await db.execute("UPDATE sessions SET status = ? WHERE id = ?", (status, session_id))
+        await db.commit()
+
+
+async def mark_session_reminder_sent(session_id: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "UPDATE sessions SET reminder_sent = 1 WHERE id = ?", (session_id,)
+        )
+        await db.commit()
+
+
+async def mark_session_start_dm_sent(session_id: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "UPDATE sessions SET start_dm_sent = 1 WHERE id = ?", (session_id,)
+        )
         await db.commit()
 
 
