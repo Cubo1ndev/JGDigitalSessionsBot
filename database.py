@@ -25,6 +25,7 @@ async def init_db() -> None:
                 channel_id     TEXT    NOT NULL,
                 message_id     TEXT,
                 host_id        TEXT    NOT NULL,
+                host_name      TEXT,
                 company_name   TEXT    NOT NULL,
                 max_players    INTEGER NOT NULL,
                 start_time_utc TEXT    NOT NULL,
@@ -40,6 +41,7 @@ async def init_db() -> None:
             "description": "TEXT",
             "logo_url": "TEXT",
             "server_name": "TEXT",
+            "host_name": "TEXT",
             "reminder_sent": "INTEGER NOT NULL DEFAULT 0",
             "start_dm_sent": "INTEGER NOT NULL DEFAULT 0",
         })
@@ -106,6 +108,7 @@ async def create_session(
     description: str | None = None,
     logo_url: str | None = None,
     server_name: str | None = None,
+    host_name: str | None = None,
 ) -> int:
     """Returns the new session's id (a random 9-digit number, not sequential)."""
     async with aiosqlite.connect(_db_path) as db:
@@ -114,14 +117,15 @@ async def create_session(
             try:
                 await db.execute(
                     "INSERT INTO sessions "
-                    "(id, guild_id, channel_id, host_id, company_name, max_players, start_time_utc, "
+                    "(id, guild_id, channel_id, host_id, host_name, company_name, max_players, start_time_utc, "
                     "description, logo_url, server_name) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" ,
                     (
                         session_id,
                         str(guild_id),
                         str(channel_id),
                         str(host_id),
+                        host_name,
                         company_name,
                         max_players,
                         start_time_utc.isoformat(),
