@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.app_commands import Range
 from discord.ext import commands, tasks
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import database
 from checks import require_host_role
@@ -19,6 +19,7 @@ GREEN = discord.Color.green()
 BLURPLE = discord.Color.blurple()
 RED = discord.Color.red()
 GREY = discord.Color.greyple()
+FOOTER_TEXT = "Provided with ❤️by JustGames Digital Team."
 
 STATUS_COLORS = {"pending": GREEN, "fired": BLURPLE, "ended": GREY, "cancelled": RED}
 STATUS_LABELS = {
@@ -26,6 +27,12 @@ STATUS_LABELS = {
     "ended": "Ended — thanks for joining!",
     "cancelled": "Cancelled",
 }
+
+
+def set_brand_footer(embed: discord.Embed, context: str | None = None) -> discord.Embed:
+    footer_text = FOOTER_TEXT if context is None else f"{context} • {FOOTER_TEXT}"
+    embed.set_footer(text=footer_text)
+    return embed
 
 
 def build_session_embed(session: dict, player_ids: list[int] | None = None) -> discord.Embed:
@@ -45,9 +52,6 @@ def build_session_embed(session: dict, player_ids: list[int] | None = None) -> d
         embed.description = session["description"]
 
     embed.add_field(name="👑 Host", value=f"<@{session['host_id']}>", inline=True)
-
-    server_val = session.get("server_name") if session.get("server_name") else "Not specified"
-    embed.add_field(name="🌐 Server", value=server_val, inline=True)
 
     if status == "pending":
         timestamp = int(start_dt.timestamp())
@@ -76,8 +80,7 @@ def build_session_embed(session: dict, player_ids: list[int] | None = None) -> d
 
     if session.get("logo_url"):
         embed.set_thumbnail(url=session["logo_url"])
-    embed.set_footer(text=f"Session #{session['id']}")
-    return embed
+    return set_brand_footer(embed, f"Session #{session['id']}")
 
 
 def build_start_dm_embed(session: dict) -> discord.Embed:
@@ -100,14 +103,29 @@ def build_start_dm_embed(session: dict) -> discord.Embed:
     description += "Have fun!"
 
     embed = discord.Embed(
-        title="🚌 Session Starting",
+        title="SESSION STARTING",
         description=description,
         color=GREEN,
     )
     if session.get("logo_url"):
         embed.set_thumbnail(url=session["logo_url"])
-    embed.set_footer(text=f"Session #{session['id']}")
-    return embed
+    return set_brand_footer(embed, f"Session #{session['id']}")
+
+
+def build_reminder_dm_embed(session: dict) -> discord.Embed:
+    start_dt = datetime.fromisoformat(session["start_time_utc"])
+    timestamp = int(start_dt.timestamp())
+    embed = discord.Embed(
+        title="SESSION STARTING SOON",
+        description=(
+            f"Your **{session['company_name']}** session starts <t:{timestamp}:R>.\n\n"
+            "You will receive another message shortly with instructions on how to join."
+        ),
+        color=discord.Color.gold(),
+    )
+    if session.get("logo_url"):
+        embed.set_thumbnail(url=session["logo_url"])
+    return set_brand_footer(embed, f"Session #{session['id']}")
 
 
 class EditServerModal(discord.ui.Modal, title="Change Server Name"):
@@ -301,6 +319,7 @@ class SessionView(discord.ui.View):
             ),
             color=BLURPLE,
         )
+        set_brand_footer(embed, f"Session #{self.session_id}")
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
@@ -394,6 +413,7 @@ class Session(commands.GroupCog, name="session"):
             description=f"The session **{session['company_name']}** (Session #{session_id}) has been cancelled by the host.",
             color=RED,
         )
+        set_brand_footer(cancel_embed)
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
@@ -511,7 +531,7 @@ class Session(commands.GroupCog, name="session"):
             description=body,
             color=BLURPLE,
         )
-        embed.set_footer(text=f"{len(player_ids)}/{session['max_players']} joined")
+        set_brand_footer(embed, f"{len(player_ids)}/{session['max_players']} joined")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="list", description="List upcoming sessions in this server")
@@ -530,6 +550,7 @@ class Session(commands.GroupCog, name="session"):
                 f"<t:{int(start_dt.timestamp())}:R> — {count}/{session['max_players']}"
             )
         embed = discord.Embed(title="Upcoming Sessions", description="\n".join(lines), color=BLURPLE)
+        set_brand_footer(embed)
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="info", description="View details of a session")
@@ -630,6 +651,7 @@ class Session(commands.GroupCog, name="session"):
             description=f"🙏 Thanks for joining the **{session['company_name']}** session!",
             color=GREY,
         )
+        set_brand_footer(thanks)
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
@@ -654,6 +676,7 @@ class Session(commands.GroupCog, name="session"):
                 f"**#{session['id']}** — {session['company_name']} — {count}/{session['max_players']} joined"
             )
         embed = discord.Embed(title="Active Sessions", description="\n".join(lines), color=BLURPLE)
+        set_brand_footer(embed)
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="help", description="Show the /session commands available to you")
@@ -667,6 +690,7 @@ class Session(commands.GroupCog, name="session"):
         )
 
         embed = discord.Embed(title="Session Commands", color=BLURPLE)
+        set_brand_footer(embed)
         embed.add_field(
             name="Everyone",
             value=(
@@ -733,21 +757,44 @@ class Session(commands.GroupCog, name="session"):
         embed = build_session_embed({**session, "status": status}, count)
         await message.edit(embed=embed, view=view)
 
-    async def _fire_session(self, session: dict) -> None:
+    async def _send_session_dm(self, session: dict, embed: discord.Embed) -> None:
         player_ids = await database.get_players(session["id"])
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                await user.send(embed=build_start_dm_embed(session))
+                await user.send(embed=embed)
             except discord.Forbidden:
                 pass
+
+    async def _send_reminder_dm(self, session: dict) -> None:
+        await self._send_session_dm(session, build_reminder_dm_embed(session))
+        await database.mark_session_reminder_sent(session["id"])
+        session["reminder_sent"] = 1
+
+    async def _send_start_dm(self, session: dict) -> None:
+        await self._send_session_dm(session, build_start_dm_embed(session))
+        await database.mark_session_start_dm_sent(session["id"])
+        session["start_dm_sent"] = 1
+
+    async def _fire_session(self, session: dict) -> None:
+        if not session.get("start_dm_sent"):
+            await self._send_start_dm(session)
         await database.set_session_status(session["id"], "fired")
         await self._update_message(session, "fired", view=None)
 
     @tasks.loop(seconds=20)
     async def check_due_sessions(self) -> None:
-        for session in await database.get_due_sessions():
-            await self._fire_session(session)
+        now = datetime.now(timezone.utc)
+        for session in await database.get_pending_sessions():
+            start_dt = datetime.fromisoformat(session["start_time_utc"])
+            seconds_until_start = (start_dt - now).total_seconds()
+
+            if not session.get("reminder_sent") and seconds_until_start <= timedelta(minutes=30).total_seconds():
+                await self._send_reminder_dm(session)
+            if not session.get("start_dm_sent") and seconds_until_start <= timedelta(minutes=5).total_seconds():
+                await self._send_start_dm(session)
+            if seconds_until_start <= 0:
+                await self._fire_session(session)
 
     @check_due_sessions.before_loop
     async def before_check_due_sessions(self) -> None:
