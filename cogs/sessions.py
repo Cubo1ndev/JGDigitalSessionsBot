@@ -25,7 +25,7 @@ GREY = discord.Color.greyple()
 FOOTER_TEXT = "Provided with ❤️by JustGames Digital Team."
 logger = logging.getLogger(__name__)
 
-STATUS_COLORS = {"pending": GREEN, "fired": BLURPLE, "ended": GREY, "cancelled": RED}
+STATUS_COLORS = {"pending": ORANGE, "fired": ORANGE, "ended": GREY, "cancelled": RED}
 STATUS_LABELS = {
     "fired": "Started — check your DMs!",
     "ended": "Ended — thanks for joining!",
@@ -48,14 +48,12 @@ def build_session_embed(session: dict, player_ids: list[int] | None = None) -> d
     max_players = session["max_players"]
 
     embed = discord.Embed(
-        title=f"{session['company_name']} - Hosted by <@{session['host_id']}>",
+        title=f"{session['company_name']} - Hosted by {session.get('host_name') or 'Unknown host'}",
         color=STATUS_COLORS[status],
     )
 
     if session.get("description"):
         embed.description = session["description"]
-
-    embed.add_field(name="👑 Host", value=f"<@{session['host_id']}>", inline=True)
 
     if status == "pending":
         timestamp = int(start_dt.timestamp())
@@ -91,9 +89,6 @@ def build_start_dm_embed(session: dict) -> discord.Embed:
     server_text = session.get("server_name") or "Not specified"
     description = (
         "The session is about to begin!\n\n"
-        f"• **Company:** {session['company_name']}\n"
-        f"• **Server:** {server_text}\n\n"
-        f"**Session details:** {session.get('description') or 'No additional details provided.'}\n\n"
         "**How to join:**\n"
         "1. Open the game.\n"
         "2. In the main menu, click **Servers**.\n"
@@ -101,7 +96,6 @@ def build_start_dm_embed(session: dict) -> discord.Embed:
     if session.get("server_name"):
         description += (
             f"3. Search for server: **\"{session['server_name']}\"**\n"
-            f"4. Look for company: **\"{session['company_name']}\"**\n\n"
         )
     else:
         description += f"3. Search for company: **\"{session['company_name']}\"**\n\n"
@@ -395,6 +389,7 @@ class Session(commands.GroupCog, name="session"):
             description=description,
             logo_url=logo.url if logo else None,
             server_name=server_name,
+            host_name=interaction.user.display_name,
         )
         session = await database.get_session(session_id)
         view = SessionView(session_id)
