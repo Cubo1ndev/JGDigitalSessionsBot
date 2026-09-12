@@ -606,6 +606,41 @@ class Session(commands.GroupCog, name="session"):
             f"Removed {user.mention} from session #{session_id}.", ephemeral=True
         )
 
+    @app_commands.command(name="forcejoin", description="Add a player to a pending session (host/admin only)")
+    @app_commands.describe(session_id="The ID of the session", user="The player to add")
+    async def forcejoin(self, interaction: discord.Interaction, session_id: int, user: discord.Member) -> None:
+        session = await database.get_session(session_id)
+        if session is None or session["guild_id"] != str(interaction.guild_id):
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
+        if session["status"] != "pending":
+            await interaction.response.send_message("Can only add players to pending sessions.", ephemeral=True)
+            return
+        if not can_manage_session(
+            is_administrator=interaction.user.guild_permissions.administrator,
+            is_original_host=interaction.user.id == int(session["host_id"]),
+        ):
+            await interaction.response.send_message(
+                "Only the host or an administrator can force players into this session.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        count = await database.count_players(session_id)
+        if not has_room(count, session["max_players"]):
+            await interaction.followup.send("This session is full.", ephemeral=True)
+            return
+        if not await database.add_player(session_id, user.id):
+            await interaction.followup.send(
+                f"{user.mention} is already in this session.", ephemeral=True
+            )
+            return
+
+        await self._update_message(session, "pending", view=SessionView(session_id))
+        await interaction.followup.send(
+            f"Added {user.mention} to session #{session_id}.", ephemeral=True
+        )
+
     @app_commands.command(name="start", description="Force a pending session to start now (host/admin only)")
     @app_commands.describe(session_id="The ID of the session to start")
     async def start(self, interaction: discord.Interaction, session_id: int) -> None:
@@ -716,7 +751,8 @@ class Session(commands.GroupCog, name="session"):
                     "`/session start <id>` — force a pending session to start now\n"
                     "`/session end <id>` — end an active session\n"
                     "`/session players <id>` — view who joined a session\n"
-                    "`/session kick <id> <user>` — remove a player from a session"
+                    "`/session kick <id> <user>` — remove a player from a session\n"
+                    "`/session forcejoin <id> <user>` — add a player to a session"
                 ),
                 inline=False,
             )
@@ -756,8 +792,8 @@ class Session(commands.GroupCog, name="session"):
             message = await channel.fetch_message(int(session["message_id"]))
         except discord.NotFound:
             return
-        count = await database.count_players(session["id"])
-        embed = build_session_embed({**session, "status": status}, count)
+        player_ids = await database.get_players(session["id"])
+        embed = build_session_embed({**session, "status": status}, player_ids)
         await message.edit(embed=embed, view=view)
 
     async def _send_session_dm(self, session: dict, embed: discord.Embed) -> bool:
