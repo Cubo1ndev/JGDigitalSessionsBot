@@ -18,14 +18,14 @@ from session_logic import (
 )
 
 GREEN = discord.Color.green()
-ORANGE = discord.Color.orange()
+BRAND_GOLD = discord.Color.from_rgb(236, 183, 35)
 BLURPLE = discord.Color.blurple()
 RED = discord.Color.red()
 GREY = discord.Color.greyple()
 FOOTER_TEXT = "Provided with ❤️by JustGames Digital Team."
 logger = logging.getLogger(__name__)
 
-STATUS_COLORS = {"pending": ORANGE, "fired": ORANGE, "ended": GREY, "cancelled": RED}
+STATUS_COLORS = {"pending": BRAND_GOLD, "fired": BRAND_GOLD, "ended": GREY, "cancelled": RED}
 STATUS_LABELS = {
     "fired": "Started — check your DMs!",
     "ended": "Ended — thanks for joining!",
@@ -104,7 +104,7 @@ def build_start_dm_embed(session: dict) -> discord.Embed:
     embed = discord.Embed(
         title="SESSION STARTING",
         description=description,
-        color=ORANGE,
+        color=BRAND_GOLD,
     )
     if session.get("logo_url"):
         embed.set_thumbnail(url=session["logo_url"])
@@ -121,7 +121,7 @@ def build_reminder_dm_embed(session: dict) -> discord.Embed:
             f"**Session details:** {session.get('description') or 'No additional details provided.'}\n\n"
             "You will receive another message shortly with instructions on how to join."
         ),
-        color=ORANGE,
+        color=BRAND_GOLD,
     )
     if session.get("logo_url"):
         embed.set_thumbnail(url=session["logo_url"])
@@ -349,6 +349,7 @@ class Session(commands.GroupCog, name="session"):
         day="Start day, 1-31 (UTC)",
         hour="Start hour, 0-23 (UTC)",
         minute="Start minute, 0-59 (UTC)",
+        host_name="Optional name to show after 'Hosted by'",
         server_name="Optional server name or location where the session will take place",
         description="What players should know, such as roleplay or construction details",
         logo="Optional logo image shown on the session card",
@@ -365,6 +366,7 @@ class Session(commands.GroupCog, name="session"):
         hour: Range[int, 0, 23],
         minute: Range[int, 0, 59],
         description: str,
+        host_name: str | None = None,
         server_name: str | None = None,
         logo: discord.Attachment | None = None,
     ) -> None:
@@ -389,7 +391,7 @@ class Session(commands.GroupCog, name="session"):
             description=description,
             logo_url=logo.url if logo else None,
             server_name=server_name,
-            host_name=interaction.user.display_name,
+            host_name=host_name.strip() if host_name and host_name.strip() else interaction.user.display_name,
         )
         session = await database.get_session(session_id)
         view = SessionView(session_id)
