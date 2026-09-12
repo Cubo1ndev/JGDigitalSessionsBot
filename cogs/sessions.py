@@ -396,8 +396,8 @@ class Session(commands.GroupCog, name="session"):
         session = await database.get_session(session_id)
         view = SessionView(session_id)
         embed = build_session_embed(session, [])
-        await interaction.response.send_message(embed=embed, view=view)
-        message = await interaction.original_response()
+        await interaction.response.defer(ephemeral=True)
+        message = await interaction.channel.send(embed=embed, view=view)
         await database.set_session_message(session_id, message.id)
         await interaction.followup.send(
             f"✅ Session **#{session_id}** created. Use `/session cancel {session_id}` to cancel it.",
