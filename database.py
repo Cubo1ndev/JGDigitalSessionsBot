@@ -73,9 +73,15 @@ async def init_db() -> None:
                 author_id      TEXT    NOT NULL,
                 vote_message_id TEXT,
                 status         TEXT    NOT NULL DEFAULT 'open',
-                created_at     TEXT    NOT NULL
+                created_at     TEXT    NOT NULL,
+                suggestion_text TEXT   NOT NULL DEFAULT '',
+                channel_id     TEXT
             )
         """)
+        await _add_missing_columns(db, "suggestion_posts", {
+            "suggestion_text": "TEXT NOT NULL DEFAULT ''",
+            "channel_id": "TEXT",
+        })
         await db.execute("""
             CREATE TABLE IF NOT EXISTS suggestion_votes (
                 thread_id TEXT    NOT NULL,
@@ -319,7 +325,7 @@ async def count_players(session_id: int) -> int:
 
 # --- Suggestion config ---
 
-async def set_suggestion_forum_channel(guild_id: int, channel_id: int) -> None:
+async def set_suggestions_channel(guild_id: int, channel_id: int) -> None:
     async with aiosqlite.connect(_db_path) as db:
         await db.execute(
             "INSERT INTO suggestion_config (guild_id, forum_channel_id) VALUES (?, ?) "
@@ -350,28 +356,35 @@ async def get_suggestion_config(guild_id: int) -> dict | None:
         return None
     return {
         "guild_id": int(row["guild_id"]),
-        "forum_channel_id": int(row["forum_channel_id"]) if row["forum_channel_id"] else None,
+        "suggestions_channel_id": int(row["forum_channel_id"]) if row["forum_channel_id"] else None,
         "staff_channel_id": int(row["staff_channel_id"]) if row["staff_channel_id"] else None,
     }
 
 
 # --- Suggestion posts ---
 
-async def create_suggestion_post(thread_id: int, guild_id: int, author_id: int) -> None:
+async def create_suggestion_post(
+    thread_id: int,
+    guild_id: int,
+    author_id: int,
+    suggestion_text: str,
+    channel_id: int | None = None,
+    vote_message_id: int | None = None,
+) -> None:
     async with aiosqlite.connect(_db_path) as db:
         await db.execute(
-            "INSERT INTO suggestion_posts (thread_id, guild_id, author_id, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (str(thread_id), str(guild_id), str(author_id), _now()),
-        )
-        await db.commit()
-
-
-async def set_suggestion_vote_message(thread_id: int, message_id: int) -> None:
-    async with aiosqlite.connect(_db_path) as db:
-        await db.execute(
-            "UPDATE suggestion_posts SET vote_message_id = ? WHERE thread_id = ?",
-            (str(message_id), str(thread_id)),
+            "INSERT INTO suggestion_posts "
+            "(thread_id, guild_id, author_id, created_at, suggestion_text, channel_id, vote_message_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(thread_id),
+                str(guild_id),
+                str(author_id),
+                _now(),
+                suggestion_text,
+                str(channel_id) if channel_id is not None else None,
+                str(vote_message_id) if vote_message_id is not None else None,
+            ),
         )
         await db.commit()
 
@@ -381,6 +394,16 @@ async def get_suggestion_post(thread_id: int) -> dict | None:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM suggestion_posts WHERE thread_id = ?", (str(thread_id),)
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_suggestion_post_by_vote_message(vote_message_id: int) -> dict | None:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM suggestion_posts WHERE vote_message_id = ?", (str(vote_message_id),)
         ) as cur:
             row = await cur.fetchone()
     return dict(row) if row else None
