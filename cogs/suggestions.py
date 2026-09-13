@@ -26,15 +26,12 @@ def thread_jump_url(guild_id: int, thread_id: int) -> str:
     return f"https://discord.com/channels/{guild_id}/{thread_id}"
 
 
-def build_vote_embed(thread_name: str) -> discord.Embed:
-    embed = discord.Embed(
-        title="🗳️ Vote on this suggestion!",
-        description=(
-            f"**{thread_name}**\n\n"
-            "Use the buttons below to vote. You can change or remove your vote anytime."
-        ),
-        color=BRAND_GOLD,
-    )
+def build_suggestion_embed(
+    idea: str, author: discord.Member | discord.User, upvotes: int, downvotes: int
+) -> discord.Embed:
+    embed = discord.Embed(title="💡 New Suggestion", description=idea, color=BRAND_GOLD)
+    embed.add_field(name="Suggested by", value=author.mention, inline=True)
+    embed.add_field(name="Votes", value=f"👍 {upvotes}  👎 {downvotes}", inline=True)
     return set_brand_footer(embed)
 
 
@@ -54,8 +51,14 @@ class SuggestionVoteView(discord.ui.View):
         else:
             await database.set_suggestion_vote(self.thread_id, interaction.user.id, value)
         upvotes, downvotes = await database.get_suggestion_vote_counts(self.thread_id)
+
+        post = await database.get_suggestion_post(self.thread_id)
+        author = interaction.client.get_user(int(post["author_id"])) or await interaction.client.fetch_user(
+            int(post["author_id"])
+        )
+        embed = build_suggestion_embed(post["suggestion_text"], author, upvotes, downvotes)
         new_view = SuggestionVoteView(self.thread_id, upvotes, downvotes)
-        await interaction.response.edit_message(view=new_view)
+        await interaction.response.edit_message(embed=embed, view=new_view)
 
     @discord.ui.button(label="👍 Upvote (0)", style=discord.ButtonStyle.green)
     async def upvote_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -64,6 +67,56 @@ class SuggestionVoteView(discord.ui.View):
     @discord.ui.button(label="👎 Downvote (0)", style=discord.ButtonStyle.red)
     async def downvote_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         await self._vote(interaction, -1)
+
+
+async def tag_and_disable_vote_message(client: discord.Client, post: dict, tag: str) -> None:
+    """Best-effort: prefix the vote-embed title with `tag`, disable its vote buttons. Never raises."""
+    channel_id = post.get("channel_id")
+    if channel_id is None:
+        config = await database.get_suggestion_config(int(post["guild_id"]))
+        channel_id = config["suggestions_channel_id"] if config else None
+    if channel_id is None:
+        logger.warning("No channel_id available; cannot tag vote message for thread %s", post["thread_id"])
+        return
+    if post.get("vote_message_id") is None:
+        logger.warning("No vote_message_id on thread %s; nothing to tag", post["thread_id"])
+        return
+
+    try:
+        channel = client.get_channel(int(channel_id)) or await client.fetch_channel(int(channel_id))
+    except (discord.NotFound, discord.Forbidden):
+        logger.warning(
+            "Suggestions channel %s unreachable; cannot tag vote message for thread %s",
+            channel_id, post["thread_id"],
+        )
+        return
+
+    try:
+        message = await channel.fetch_message(int(post["vote_message_id"]))
+    except discord.NotFound:
+        logger.info(
+            "Vote message %s already deleted; nothing to tag for thread %s",
+            post["vote_message_id"], post["thread_id"],
+        )
+        return
+    except discord.Forbidden:
+        logger.warning(
+            "Forbidden fetching vote message %s for thread %s", post["vote_message_id"], post["thread_id"]
+        )
+        return
+
+    embed = message.embeds[0] if message.embeds else discord.Embed()
+    embed.title = f"{tag} {embed.title}" if embed.title else tag
+
+    upvotes, downvotes = await database.get_suggestion_vote_counts(int(post["thread_id"]))
+    view = SuggestionVoteView(int(post["thread_id"]), upvotes, downvotes)
+    for child in view.children:
+        child.disabled = True
+
+    try:
+        await message.edit(embed=embed, view=view)
+    except discord.HTTPException:
+        logger.warning("Failed to edit vote message %s for thread %s", post["vote_message_id"], post["thread_id"])
 
 
 def build_duplicate_report_embed(
@@ -119,11 +172,28 @@ class DuplicateReportView(discord.ui.View):
             await interaction.followup.send("The duplicate post no longer exists.", ephemeral=True)
             return
 
+        survivor_url = thread_jump_url(int(report["guild_id"]), int(survivor["thread_id"]))
+
+        notice_embed = discord.Embed(
+            title="🔀 Marked as Duplicate",
+            description=(
+                "This suggestion was identified as a duplicate of an existing one and has been merged.\n\n"
+                f"Head over to the original to keep discussing and voting: {survivor_url}"
+            ),
+            color=BRAND_GOLD,
+        )
+        set_brand_footer(notice_embed)
+        try:
+            await loser_thread.send(embed=notice_embed)
+        except discord.HTTPException:
+            logger.warning("Failed to post duplicate notice in thread %s", loser["thread_id"])
+
+        await tag_and_disable_vote_message(client, loser, "[DUPLICATE]")
+
         await loser_thread.edit(locked=True, archived=True, reason="Merged as a duplicate suggestion")
         await database.set_suggestion_status(int(loser["thread_id"]), "merged")
         await database.set_duplicate_report_status(self.report_id, "approved")
 
-        survivor_url = thread_jump_url(int(report["guild_id"]), int(survivor["thread_id"]))
         try:
             author = client.get_user(int(loser["author_id"])) or await client.fetch_user(int(loser["author_id"]))
             dm_embed = discord.Embed(
@@ -276,13 +346,13 @@ class Suggestions(commands.GroupCog, name="suggestions"):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="setchannel", description="Set the forum channel where suggestions are posted")
-    @app_commands.describe(channel="A forum channel")
+    @app_commands.command(name="setsuggestionschannel", description="Set the text channel where suggestions are posted")
+    @app_commands.describe(channel="A text channel")
     @app_commands.checks.has_permissions(administrator=True)
-    async def setchannel(self, interaction: discord.Interaction, channel: discord.ForumChannel) -> None:
-        await database.set_suggestion_forum_channel(interaction.guild_id, channel.id)
+    async def setsuggestionschannel(self, interaction: discord.Interaction, channel: discord.TextChannel) -> None:
+        await database.set_suggestions_channel(interaction.guild_id, channel.id)
         await interaction.response.send_message(
-            f"Suggestions will now be tracked in {channel.mention}.", ephemeral=True
+            f"Suggestions will now be posted in {channel.mention}.", ephemeral=True
         )
 
     @app_commands.command(name="setstaffchannel", description="Set the channel where duplicate reports are sent")
@@ -318,6 +388,7 @@ class Suggestions(commands.GroupCog, name="suggestions"):
             return
 
         await database.set_suggestion_status(interaction.channel.id, "implemented")
+        await tag_and_disable_vote_message(interaction.client, post, "[IMPLEMENTED]")
         embed = discord.Embed(
             title="✅ Suggestion Implemented",
             description="This suggestion has been implemented. Thanks for the idea!",
@@ -327,7 +398,7 @@ class Suggestions(commands.GroupCog, name="suggestions"):
         await interaction.response.send_message(embed=embed)
         await interaction.channel.edit(locked=True, archived=True, reason="Suggestion implemented")
 
-    @setchannel.error
+    @setsuggestionschannel.error
     @setstaffchannel.error
     @implemented.error
     async def admin_only_error(
@@ -337,15 +408,6 @@ class Suggestions(commands.GroupCog, name="suggestions"):
             await interaction.response.send_message(
                 "Only Discord server administrators can use this command.", ephemeral=True
             )
-
-    async def _get_post_text(self, thread: discord.Thread) -> str:
-        content = ""
-        try:
-            starter = thread.starter_message or await thread.fetch_message(thread.id)
-            content = starter.content
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            pass
-        return f"{thread.name}\n{content}"
 
     async def create_duplicate_report(
         self, guild_id: int, thread_a_id: int, thread_b_id: int, note: str
@@ -363,34 +425,72 @@ class Suggestions(commands.GroupCog, name="suggestions"):
         await database.set_duplicate_report_message(report_id, message.id)
 
     @commands.Cog.listener()
-    async def on_thread_create(self, thread: discord.Thread) -> None:
-        config = await database.get_suggestion_config(thread.guild.id)
-        if config is None or config["forum_channel_id"] != thread.parent_id:
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
+        post = await database.get_suggestion_post_by_vote_message(payload.message_id)
+        if post is None or post["status"] != "open":
             return
+        await database.set_suggestion_status(int(post["thread_id"]), "deleted")
+        logger.info(
+            "Vote message %s deleted; marked suggestion thread %s as deleted",
+            payload.message_id, post["thread_id"],
+        )
 
-        await database.create_suggestion_post(thread.id, thread.guild.id, thread.owner_id)
-        message = await thread.send(embed=build_vote_embed(thread.name), view=SuggestionVoteView(thread.id))
-        await database.set_suggestion_vote_message(thread.id, message.id)
 
-        new_text = await self._get_post_text(thread)
-        candidates = []
-        for post in await database.get_open_suggestion_posts(thread.guild.id):
-            if int(post["thread_id"]) == thread.id:
-                continue
-            other = thread.guild.get_thread(int(post["thread_id"]))
-            if other is None:
-                continue
-            candidates.append((post["thread_id"], await self._get_post_text(other)))
+@app_commands.command(name="suggest", description="Submit a new suggestion")
+@app_commands.describe(idea="Your suggestion")
+async def suggest(interaction: discord.Interaction, idea: str) -> None:
+    config = await database.get_suggestion_config(interaction.guild_id)
+    if config is None or config["suggestions_channel_id"] is None:
+        await interaction.response.send_message(
+            "Ask an admin to run /suggestions setsuggestionschannel first.", ephemeral=True
+        )
+        return
+    channel = interaction.client.get_channel(config["suggestions_channel_id"])
+    if channel is None:
+        await interaction.response.send_message(
+            "The configured suggestions channel no longer exists.", ephemeral=True
+        )
+        return
 
-        match = find_similar_suggestion(new_text, candidates, DUPLICATE_THRESHOLD)
-        if match is not None:
-            match_thread_id, ratio = match
-            await self.create_duplicate_report(
-                thread.guild.id, thread.id, int(match_thread_id),
-                f"Auto-detected by text similarity ({ratio:.0%} match).",
-            )
+    await interaction.response.defer(ephemeral=True)
+
+    message = await channel.send(embed=build_suggestion_embed(idea, interaction.user, 0, 0))
+    try:
+        thread = await message.create_thread(name=idea[:100])
+    except discord.HTTPException:
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            logger.warning("Failed to clean up suggestion message %s after thread creation failed", message.id)
+        await interaction.followup.send(
+            "Couldn't create the discussion thread — please try again.", ephemeral=True
+        )
+        return
+
+    await database.create_suggestion_post(
+        thread.id, interaction.guild_id, interaction.user.id, idea,
+        channel_id=channel.id, vote_message_id=message.id,
+    )
+    await message.edit(view=SuggestionVoteView(thread.id, 0, 0))
+
+    candidates = [
+        (post["thread_id"], post["suggestion_text"])
+        for post in await database.get_open_suggestion_posts(interaction.guild_id)
+        if int(post["thread_id"]) != thread.id
+    ]
+    match = find_similar_suggestion(idea, candidates, DUPLICATE_THRESHOLD)
+    if match is not None:
+        match_thread_id, ratio = match
+        cog = interaction.client.get_cog("suggestions")
+        await cog.create_duplicate_report(
+            interaction.guild_id, thread.id, int(match_thread_id),
+            f"Auto-detected by text similarity ({ratio:.0%} match).",
+        )
+
+    await interaction.followup.send(f"Suggestion posted: {message.jump_url}", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Suggestions(bot))
     bot.tree.add_command(report_duplicate_context_menu)
+    bot.tree.add_command(suggest)
