@@ -18,11 +18,13 @@ from session_logic import (
 )
 
 GREEN = discord.Color.green()
-BRAND_GOLD = discord.Color.from_rgb(236, 183, 35)
 BLURPLE = discord.Color.blurple()
 RED = discord.Color.red()
 GREY = discord.Color.greyple()
-FOOTER_TEXT = "Provided with ❤️by JustGames Digital Team."
+FOOTER_TEXT = "Provided by JustGames Digital Team."
+NO_MENTIONS = discord.AllowedMentions(
+    everyone=False, users=False, roles=False, replied_user=False
+)
 logger = logging.getLogger(__name__)
 
 STATUS_LABELS = {
@@ -34,7 +36,7 @@ STATUS_LABELS = {
 
 def add_brand_footer(content: str, context: str | None = None) -> str:
     footer_text = FOOTER_TEXT if context is None else f"{context} • {FOOTER_TEXT}"
-    return f"{content}\n\n-{footer_text}"
+    return f"{content}\n\n{footer_text}"
 
 
 def build_session_content(session: dict, player_ids: list[int] | None = None) -> str:
@@ -46,16 +48,17 @@ def build_session_content(session: dict, player_ids: list[int] | None = None) ->
     max_players = session["max_players"]
 
     lines = [
-        f"**{session['company_name']}** - Hosted by {session.get('host_name') or 'Unknown host'}"
+        f"# {session['company_name']}",
+        f"Hosted by {session.get('host_name') or 'Unknown host'}",
     ]
     if session.get("description"):
-        lines.extend(["", session["description"]])
+        lines.append(session["description"])
 
     if status == "pending":
         timestamp = int(start_dt.timestamp())
-        lines.extend(["", f"⏰ **Starts:** <t:{timestamp}:R> (<t:{timestamp}:F>)"])
+        lines.append(f"Starts: <t:{timestamp}:R> (<t:{timestamp}:F>)")
     else:
-        lines.extend(["", f"📌 **Status:** {STATUS_LABELS[status]}"])
+        lines.append(f"Status: {STATUS_LABELS[status]}")
 
     if player_ids:
         mentions = [f"<@{uid}>" for uid in player_ids]
@@ -74,10 +77,10 @@ def build_session_content(session: dict, player_ids: list[int] | None = None) ->
     else:
         player_text = "*No players joined yet*"
 
-    lines.extend(["", f"👥 **Players ({player_count}/{max_players}):**", player_text])
+    lines.extend([f"Players ({player_count}/{max_players})", player_text])
 
     if session.get("logo_url"):
-        lines.extend(["", f"🖼️ Logo: {session['logo_url']}"])
+        lines.extend(["", f"Logo: {session['logo_url']}"])
     return add_brand_footer("\n".join(lines), f"Session #{session['id']}")
 
 
@@ -247,7 +250,11 @@ class SessionView(discord.ui.LayoutView):
         self.session_id = session_id
         self.body = discord.ui.TextDisplay("Session details unavailable.")
         self.footer = discord.ui.TextDisplay(f"Session #{session_id}")
-        children = [self.body, discord.ui.Separator(), self.footer]
+        children = [
+            self.body,
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+            self.footer,
+        ]
         if show_controls:
             self.controls = discord.ui.ActionRow()
             self.join_button = discord.ui.Button(
@@ -259,7 +266,7 @@ class SessionView(discord.ui.LayoutView):
                 custom_id=f"session_leave:{session_id}",
             )
             self.settings_button = discord.ui.Button(
-                label="⚙️ Host Settings", style=discord.ButtonStyle.grey,
+                label="Host Settings", style=discord.ButtonStyle.grey,
                 custom_id=f"session_settings:{session_id}",
             )
             self.join_button.callback = self._join_button
@@ -268,14 +275,17 @@ class SessionView(discord.ui.LayoutView):
             self.controls.add_item(self.join_button)
             self.controls.add_item(self.leave_button)
             self.controls.add_item(self.settings_button)
-            children.extend([discord.ui.Separator(), self.controls])
+            children.extend([
+                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+                self.controls,
+            ])
         self.container = discord.ui.Container(*children)
         self.add_item(self.container)
         if content is not None:
             self.set_content(content)
 
     def set_content(self, content: str) -> None:
-        body, separator, footer = content.rpartition("\n\n-")
+        body, separator, footer = content.rpartition("\n\n")
         self.body.content = body if separator else content
         self.footer.content = footer if separator else f"Session #{self.session_id}"
 
@@ -295,7 +305,7 @@ class SessionView(discord.ui.LayoutView):
         player_ids = await database.get_players(self.session_id)
         content = build_session_content(session, player_ids)
         self.set_content(content)
-        await interaction.response.edit_message(view=self)
+        await interaction.response.edit_message(view=self, allowed_mentions=NO_MENTIONS)
 
     async def _leave_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
@@ -309,7 +319,7 @@ class SessionView(discord.ui.LayoutView):
         player_ids = await database.get_players(self.session_id)
         content = build_session_content(session, player_ids)
         self.set_content(content)
-        await interaction.response.edit_message(view=self)
+        await interaction.response.edit_message(view=self, allowed_mentions=NO_MENTIONS)
 
     async def _settings_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
@@ -427,7 +437,7 @@ class Session(commands.GroupCog, name="session"):
         content = build_session_content(session, [])
         view = SessionView(session_id, content)
         await interaction.response.defer(ephemeral=True)
-        message = await interaction.channel.send(view=view)
+        message = await interaction.channel.send(view=view, allowed_mentions=NO_MENTIONS)
         await database.set_session_message(session_id, message.id)
         await interaction.followup.send(
             f"✅ Session **#{session_id}** created. Use `/session cancel {session_id}` to cancel it.",
@@ -605,7 +615,9 @@ class Session(commands.GroupCog, name="session"):
         content = build_session_content(session, player_ids)
         view = SessionView(session_id, content) if session["status"] == "pending" else None
         await interaction.response.send_message(
-            content=content if view is None else None, view=view
+            content=content if view is None else None,
+            view=view,
+            allowed_mentions=NO_MENTIONS,
         )
 
     @app_commands.command(name="kick", description="Remove a player from a session (host/admin only)")
@@ -821,7 +833,7 @@ class Session(commands.GroupCog, name="session"):
             view.set_content(content)
         elif view is None:
             view = SessionView(session["id"], content, show_controls=False)
-        await message.edit(view=view)
+        await message.edit(view=view, allowed_mentions=NO_MENTIONS)
 
     async def _send_session_dm(self, session: dict, content: str) -> bool:
         player_ids = await database.get_players(session["id"])
