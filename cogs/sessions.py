@@ -153,29 +153,10 @@ def build_session_banner(session: dict) -> discord.File:
     for offset in range(-height, width, 90):
         draw.line((offset, height, offset + height, 0), fill=(31, 34, 45, 70), width=2)
 
-    draw.rounded_rectangle(
-        (28, 28, width - 28, height - 28),
-        radius=22,
-        fill=(12, 16, 25, 72),
-        outline=(172, 186, 210, 190),
-        width=2,
-    )
     title = session.get("company_name") or "Session"
     host_name = session.get("host_name") or "Unknown host"
     title_font = _fit_banner_font(title, 104, 940, bold=True)
     host_font = _fit_banner_font(f"Hosted by {host_name[:48]}", 42, 820)
-    title_box = draw.textbbox((0, 0), title, font=title_font)
-    host_box = draw.textbbox((0, 0), f"Hosted by {host_name[:48]}", font=host_font)
-    title_width = title_box[2] - title_box[0]
-    host_width = host_box[2] - host_box[0]
-    panel_width = min(1080, max(520, title_width + 120, host_width + 160))
-    draw.rounded_rectangle(
-        (width // 2 - panel_width // 2, 54, width // 2 + panel_width // 2, height - 54),
-        radius=18,
-        fill=(10, 14, 23, 125),
-        outline=(177, 194, 220, 150),
-        width=2,
-    )
 
     def centered_text(
         text: str,
@@ -193,12 +174,6 @@ def build_session_banner(session: dict) -> discord.File:
         anchor="mm",
     )
     centered_text(title, 135, title_font, (255, 255, 255))
-    draw.rounded_rectangle(
-        (width // 2 - min(title_width // 2, 250), 190,
-         width // 2 + min(title_width // 2, 250), 194),
-        radius=2,
-        fill=(132, 196, 255, 230),
-    )
     centered_text(f"Hosted by {host_name[:48]}", 232, host_font, (224, 231, 242))
 
     buffer = BytesIO()
