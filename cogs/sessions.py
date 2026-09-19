@@ -1,6 +1,9 @@
 import logging
+from io import BytesIO
+from pathlib import Path
 
 import discord
+from PIL import Image, ImageDraw, ImageFont
 from discord import app_commands
 from discord.app_commands import Range
 from discord.ext import commands, tasks
@@ -39,7 +42,9 @@ def add_brand_footer(content: str, context: str | None = None) -> str:
     return f"{content}\n\n{footer_text}"
 
 
-def build_session_content(session: dict, player_ids: list[int] | None = None) -> str:
+def build_session_sections(
+    session: dict, player_ids: list[int] | None = None
+) -> tuple[str, str, str, str]:
     if player_ids is None:
         player_ids = []
     start_dt = datetime.fromisoformat(session["start_time_utc"])
@@ -47,18 +52,14 @@ def build_session_content(session: dict, player_ids: list[int] | None = None) ->
     player_count = len(player_ids)
     max_players = session["max_players"]
 
-    lines = [
-        f"# {session['company_name']}",
-        f"Hosted by {session.get('host_name') or 'Unknown host'}",
-    ]
-    if session.get("description"):
-        lines.append(session["description"])
+    header = f"# {session['company_name']}\nHosted by {session.get('host_name') or 'Unknown host'}"
+    description = session.get("description") or "No description provided."
 
     if status == "pending":
         timestamp = int(start_dt.timestamp())
-        lines.append(f"Starts: <t:{timestamp}:R> (<t:{timestamp}:F>)")
+        schedule = f"Starts\n<t:{timestamp}:R> (<t:{timestamp}:F>)"
     else:
-        lines.append(f"Status: {STATUS_LABELS[status]}")
+        schedule = f"Status\n{STATUS_LABELS[status]}"
 
     if player_ids:
         mentions = [f"<@{uid}>" for uid in player_ids]
@@ -77,11 +78,62 @@ def build_session_content(session: dict, player_ids: list[int] | None = None) ->
     else:
         player_text = "*No players joined yet*"
 
-    lines.extend([f"Players ({player_count}/{max_players})", player_text])
+    players = f"Players ({player_count}/{max_players})\n{player_text}"
 
     if session.get("logo_url"):
-        lines.extend(["", f"Logo: {session['logo_url']}"])
-    return add_brand_footer("\n".join(lines), f"Session #{session['id']}")
+        description += f"\n\nLogo: {session['logo_url']}"
+    return header, description, schedule, players
+
+
+def build_session_content(session: dict, player_ids: list[int] | None = None) -> str:
+    return "\n\n".join(build_session_sections(session, player_ids))
+
+
+def _banner_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    font_names = [
+        "arialbd.ttf" if bold else "arial.ttf",
+        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+    ]
+    font_paths = [
+        Path("C:/Windows/Fonts") / name for name in font_names
+    ] + [Path("/usr/share/fonts/truetype/dejavu") / name for name in font_names]
+    for path in font_paths:
+        if path.exists():
+            return ImageFont.truetype(str(path), size)
+    return ImageFont.load_default()
+
+
+def build_session_banner(session: dict) -> discord.File:
+    width, height = 1200, 320
+    image = Image.new("RGB", (width, height), (24, 26, 32))
+    draw = ImageDraw.Draw(image)
+
+    for x in range(width):
+        blend = x / width
+        color = (
+            int(24 + 20 * blend),
+            int(26 + 8 * blend),
+            int(32 + 2 * blend),
+        )
+        draw.line((x, 0, x, height), fill=color)
+
+    draw.rounded_rectangle((28, 28, width - 28, height - 28), radius=18, outline=(70, 74, 84), width=2)
+    draw.rectangle((28, 28, 34, height - 28), fill=(236, 126, 24))
+    draw.ellipse((width - 230, -80, width + 80, 230), fill=(46, 48, 58))
+    draw.ellipse((width - 160, 90, width + 100, 350), fill=(34, 36, 44))
+
+    title_font = _banner_font(92, bold=True)
+    host_font = _banner_font(38)
+    label_font = _banner_font(22, bold=True)
+    host_name = session.get("host_name") or "Unknown host"
+    draw.text((78, 62), "SESSION", font=title_font, fill=(248, 249, 250))
+    draw.text((82, 177), "HOSTED BY", font=label_font, fill=(236, 126, 24))
+    draw.text((82, 208), host_name[:48], font=host_font, fill=(214, 217, 224))
+
+    buffer = BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    buffer.seek(0)
+    return discord.File(buffer, filename="session_banner.png")
 
 
 def build_start_dm_content(session: dict) -> str:
@@ -243,26 +295,32 @@ class SessionView(discord.ui.LayoutView):
     def __init__(
         self,
         session_id: int,
-        content: str | None = None,
         show_controls: bool = True,
     ) -> None:
         super().__init__(timeout=None)
         self.session_id = session_id
-        self.body = discord.ui.TextDisplay("Session details unavailable.")
-        self.footer = discord.ui.TextDisplay(f"Session #{session_id}")
-        children = [
-            self.body,
-            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-            self.footer,
-        ]
+        self.banner = discord.ui.MediaGallery()
+        self.banner.add_item(
+            media="attachment://session_banner.png",
+            description="Session banner",
+        )
+        self.header = discord.ui.TextDisplay(f"# Session {session_id}\nHosted by Unknown host")
+        self.description = discord.ui.TextDisplay("No description provided.")
+        self.schedule = discord.ui.TextDisplay("Starts\nNot scheduled")
+        self.players = discord.ui.TextDisplay("Players (0/0)\nNo players joined yet.")
+        self.add_item(self.banner)
+        self.add_item(discord.ui.Container(self.header))
+        self.add_item(discord.ui.Container(self.description))
+        self.add_item(discord.ui.Container(self.schedule))
+        self.add_item(discord.ui.Container(self.players))
         if show_controls:
             self.controls = discord.ui.ActionRow()
             self.join_button = discord.ui.Button(
-                label="Join", style=discord.ButtonStyle.green,
+                label="Join", style=discord.ButtonStyle.grey,
                 custom_id=f"session_join:{session_id}",
             )
             self.leave_button = discord.ui.Button(
-                label="Leave", style=discord.ButtonStyle.red,
+                label="Leave", style=discord.ButtonStyle.grey,
                 custom_id=f"session_leave:{session_id}",
             )
             self.settings_button = discord.ui.Button(
@@ -275,19 +333,14 @@ class SessionView(discord.ui.LayoutView):
             self.controls.add_item(self.join_button)
             self.controls.add_item(self.leave_button)
             self.controls.add_item(self.settings_button)
-            children.extend([
-                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-                self.controls,
-            ])
-        self.container = discord.ui.Container(*children)
-        self.add_item(self.container)
-        if content is not None:
-            self.set_content(content)
-
-    def set_content(self, content: str) -> None:
-        body, separator, footer = content.rpartition("\n\n")
-        self.body.content = body if separator else content
-        self.footer.content = footer if separator else f"Session #{self.session_id}"
+            self.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.large))
+            self.add_item(discord.ui.Container(self.controls))
+    def set_session_content(self, session: dict, player_ids: list[int] | None = None) -> None:
+        header, description, schedule, players = build_session_sections(session, player_ids)
+        self.header.content = header
+        self.description.content = description
+        self.schedule.content = schedule
+        self.players.content = players
 
     async def _join_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
@@ -303,9 +356,12 @@ class SessionView(discord.ui.LayoutView):
             await interaction.response.send_message("You already joined this session.", ephemeral=True)
             return
         player_ids = await database.get_players(self.session_id)
-        content = build_session_content(session, player_ids)
-        self.set_content(content)
-        await interaction.response.edit_message(view=self, allowed_mentions=NO_MENTIONS)
+        self.set_session_content(session, player_ids)
+        await interaction.response.edit_message(
+            view=self,
+            attachments=[build_session_banner(session)],
+            allowed_mentions=NO_MENTIONS,
+        )
 
     async def _leave_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
@@ -317,9 +373,12 @@ class SessionView(discord.ui.LayoutView):
             await interaction.response.send_message("You hadn't joined this session.", ephemeral=True)
             return
         player_ids = await database.get_players(self.session_id)
-        content = build_session_content(session, player_ids)
-        self.set_content(content)
-        await interaction.response.edit_message(view=self, allowed_mentions=NO_MENTIONS)
+        self.set_session_content(session, player_ids)
+        await interaction.response.edit_message(
+            view=self,
+            attachments=[build_session_banner(session)],
+            allowed_mentions=NO_MENTIONS,
+        )
 
     async def _settings_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
@@ -434,10 +493,14 @@ class Session(commands.GroupCog, name="session"):
             host_name=host_name.strip() if host_name and host_name.strip() else interaction.user.display_name,
         )
         session = await database.get_session(session_id)
-        content = build_session_content(session, [])
-        view = SessionView(session_id, content)
+        view = SessionView(session_id)
+        view.set_session_content(session, [])
         await interaction.response.defer(ephemeral=True)
-        message = await interaction.channel.send(view=view, allowed_mentions=NO_MENTIONS)
+        message = await interaction.channel.send(
+            view=view,
+            file=build_session_banner(session),
+            allowed_mentions=NO_MENTIONS,
+        )
         await database.set_session_message(session_id, message.id)
         await interaction.followup.send(
             f"✅ Session **#{session_id}** created. Use `/session cancel {session_id}` to cancel it.",
@@ -613,10 +676,13 @@ class Session(commands.GroupCog, name="session"):
             return
         player_ids = await database.get_players(session_id)
         content = build_session_content(session, player_ids)
-        view = SessionView(session_id, content) if session["status"] == "pending" else None
+        view = SessionView(session_id) if session["status"] == "pending" else None
+        if view is not None:
+            view.set_session_content(session, player_ids)
         await interaction.response.send_message(
             content=content if view is None else None,
             view=view,
+            attachments=[build_session_banner(session)] if view is not None else [],
             allowed_mentions=NO_MENTIONS,
         )
 
@@ -828,12 +894,17 @@ class Session(commands.GroupCog, name="session"):
         except discord.NotFound:
             return
         player_ids = await database.get_players(session["id"])
-        content = build_session_content({**session, "status": status}, player_ids)
+        updated_session = {**session, "status": status}
         if isinstance(view, SessionView):
-            view.set_content(content)
+            view.set_session_content(updated_session, player_ids)
         elif view is None:
-            view = SessionView(session["id"], content, show_controls=False)
-        await message.edit(view=view, allowed_mentions=NO_MENTIONS)
+            view = SessionView(session["id"], show_controls=False)
+            view.set_session_content(updated_session, player_ids)
+        await message.edit(
+            view=view,
+            attachments=[build_session_banner({**session, "status": status})],
+            allowed_mentions=NO_MENTIONS,
+        )
 
     async def _send_session_dm(self, session: dict, content: str) -> bool:
         player_ids = await database.get_players(session["id"])
