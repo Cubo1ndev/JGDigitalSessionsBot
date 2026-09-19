@@ -100,7 +100,10 @@ def _banner_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | Imag
     for path in font_paths:
         if path.exists():
             return ImageFont.truetype(str(path), size)
-    return ImageFont.load_default()
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
 
 
 def _fit_banner_font(
@@ -141,17 +144,49 @@ def build_session_banner(session: dict) -> discord.File:
     title_font = _fit_banner_font(title, 112, 980, bold=True)
     host_font = _fit_banner_font(f"Hosted by {host_name[:48]}", 48, 900)
 
-    def centered_text(text: str, y: int, font: ImageFont.ImageFont, fill: tuple[int, int, int]) -> None:
-        bounds = draw.textbbox((0, 0), text, font=font)
-        draw.text(((width - (bounds[2] - bounds[0])) / 2, y), text, font=font, fill=fill)
+    def centered_text(
+        text: str,
+        y: int,
+        font: ImageFont.ImageFont,
+        fill: tuple[int, int, int],
+    ) -> None:
+        draw.text((width // 2, y), text, font=font, fill=fill, anchor="mm")
 
-    centered_text(title, 78, title_font, (248, 249, 250))
-    centered_text(f"Hosted by {host_name[:48]}", 208, host_font, (214, 217, 224))
+    centered_text(title, 132, title_font, (248, 249, 250))
+    centered_text(f"Hosted by {host_name[:48]}", 210, host_font, (214, 217, 224))
 
     buffer = BytesIO()
     image.save(buffer, format="PNG", optimize=True)
     buffer.seek(0)
     return discord.File(buffer, filename="session_banner.png")
+
+
+async def sync_session_thread_member(
+    bot: commands.Bot,
+    session: dict,
+    user: discord.abc.User,
+    add: bool,
+) -> None:
+    thread_id = session.get("thread_id")
+    guild = bot.get_guild(int(session["guild_id"]))
+    if not thread_id or guild is None:
+        return
+    thread = guild.get_thread(int(thread_id))
+    if thread is None:
+        return
+    try:
+        if add:
+            await thread.add_user(user)
+        else:
+            await thread.remove_user(user)
+    except discord.HTTPException:
+        logger.warning(
+            "Could not %s user %s %s thread %s",
+            "add" if add else "remove",
+            user.id,
+            "to" if add else "from",
+            thread_id,
+        )
 
 
 def build_start_dm_content(session: dict) -> str:
@@ -331,29 +366,23 @@ class SessionView(discord.ui.LayoutView):
         if show_controls:
             self.controls = discord.ui.ActionRow()
             self.join_button = discord.ui.Button(
-                label="Join", style=discord.ButtonStyle.grey,
+                label="Join", emoji="📥", style=discord.ButtonStyle.grey,
                 custom_id=f"session_join:{session_id}",
             )
             self.leave_button = discord.ui.Button(
-                label="Leave", style=discord.ButtonStyle.grey,
+                label="Leave", emoji="📤", style=discord.ButtonStyle.grey,
                 custom_id=f"session_leave:{session_id}",
             )
             self.settings_button = discord.ui.Button(
-                label="Host Settings", style=discord.ButtonStyle.grey,
+                label="Host Settings", emoji="⚙️", style=discord.ButtonStyle.grey,
                 custom_id=f"session_settings:{session_id}",
-            )
-            self.copy_id_button = discord.ui.Button(
-                label="Copy Session ID", style=discord.ButtonStyle.grey,
-                custom_id=f"session_copy_id:{session_id}",
             )
             self.join_button.callback = self._join_button
             self.leave_button.callback = self._leave_button
             self.settings_button.callback = self._settings_button
-            self.copy_id_button.callback = self._copy_id_button
             self.controls.add_item(self.join_button)
             self.controls.add_item(self.leave_button)
             self.controls.add_item(self.settings_button)
-            self.controls.add_item(self.copy_id_button)
             children.extend([
                 discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
                 self.controls,
@@ -366,12 +395,6 @@ class SessionView(discord.ui.LayoutView):
         self.description.content = description
         self.schedule.content = schedule
         self.players.content = players
-
-    async def _copy_id_button(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(
-            f"Session ID: `{self.session_id}`\nCopy the ID from this private message.",
-            ephemeral=True,
-        )
 
     async def _join_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
@@ -386,6 +409,7 @@ class SessionView(discord.ui.LayoutView):
         if not added:
             await interaction.response.send_message("You already joined this session.", ephemeral=True)
             return
+        await sync_session_thread_member(interaction.client, session, interaction.user, add=True)
         player_ids = await database.get_players(self.session_id)
         self.set_session_content(session, player_ids)
         await interaction.response.edit_message(
@@ -403,6 +427,7 @@ class SessionView(discord.ui.LayoutView):
         if not removed:
             await interaction.response.send_message("You hadn't joined this session.", ephemeral=True)
             return
+        await sync_session_thread_member(interaction.client, session, interaction.user, add=False)
         player_ids = await database.get_players(self.session_id)
         self.set_session_content(session, player_ids)
         await interaction.response.edit_message(
@@ -533,10 +558,34 @@ class Session(commands.GroupCog, name="session"):
             allowed_mentions=NO_MENTIONS,
         )
         await database.set_session_message(session_id, message.id)
+        try:
+            thread = await message.create_thread(
+                name=f"{session['company_name']} Session #{session_id}"[:100],
+                auto_archive_duration=1440,
+            )
+            await database.set_session_thread(session_id, thread.id)
+        except discord.HTTPException:
+            logger.exception("Could not create thread for session %s", session_id)
         await interaction.followup.send(
             f"✅ Session **#{session_id}** created. Use `/session cancel {session_id}` to cancel it.",
             ephemeral=True,
         )
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot or not isinstance(message.channel, discord.Thread):
+            return
+        session = await database.get_session_by_thread_id(message.channel.id)
+        if session is None or session["status"] not in {"pending", "fired"}:
+            return
+        player_ids = await database.get_players(session["id"])
+        allowed_ids = {int(session["host_id"]), *player_ids}
+        if message.author.id in allowed_ids:
+            return
+        try:
+            await message.delete(reason="Only session attendees may post in this thread")
+        except discord.HTTPException:
+            logger.warning("Could not remove non-attendee message in thread %s", message.channel.id)
 
     async def _cancel_session_internal(self, session_id: int) -> None:
         session = await database.get_session(session_id)
@@ -740,6 +789,7 @@ class Session(commands.GroupCog, name="session"):
                 f"{user.mention} hadn't joined this session.", ephemeral=True
             )
             return
+        await sync_session_thread_member(self.bot, session, user, add=False)
         if session["status"] == "pending":
             await self._update_message(session, "pending", view=SessionView(session_id))
         await interaction.followup.send(
@@ -776,6 +826,7 @@ class Session(commands.GroupCog, name="session"):
             )
             return
 
+        await sync_session_thread_member(self.bot, session, user, add=True)
         await self._update_message(session, "pending", view=SessionView(session_id))
         await interaction.followup.send(
             f"Added {user.mention} to session #{session_id}.", ephemeral=True

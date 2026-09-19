@@ -24,6 +24,7 @@ async def init_db() -> None:
                 guild_id       TEXT    NOT NULL,
                 channel_id     TEXT    NOT NULL,
                 message_id     TEXT,
+                thread_id      TEXT,
                 host_id        TEXT    NOT NULL,
                 host_name      TEXT,
                 company_name   TEXT    NOT NULL,
@@ -41,6 +42,7 @@ async def init_db() -> None:
             "description": "TEXT",
             "logo_url": "TEXT",
             "server_name": "TEXT",
+            "thread_id": "TEXT",
             "host_name": "TEXT",
             "reminder_sent": "INTEGER NOT NULL DEFAULT 0",
             "start_dm_sent": "INTEGER NOT NULL DEFAULT 0",
@@ -148,10 +150,28 @@ async def set_session_message(session_id: int, message_id: int) -> None:
         await db.commit()
 
 
+async def set_session_thread(session_id: int, thread_id: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "UPDATE sessions SET thread_id = ? WHERE id = ?", (str(thread_id), session_id)
+        )
+        await db.commit()
+
+
 async def get_session(session_id: int) -> dict | None:
     async with aiosqlite.connect(_db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def get_session_by_thread_id(thread_id: int) -> dict | None:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM sessions WHERE thread_id = ?", (str(thread_id),)
+        ) as cur:
             row = await cur.fetchone()
     return dict(row) if row else None
 
