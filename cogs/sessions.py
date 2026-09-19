@@ -25,7 +25,6 @@ GREY = discord.Color.greyple()
 FOOTER_TEXT = "Provided with ❤️by JustGames Digital Team."
 logger = logging.getLogger(__name__)
 
-STATUS_COLORS = {"pending": BRAND_GOLD, "fired": BRAND_GOLD, "ended": GREY, "cancelled": RED}
 STATUS_LABELS = {
     "fired": "Started — check your DMs!",
     "ended": "Ended — thanks for joining!",
@@ -33,13 +32,12 @@ STATUS_LABELS = {
 }
 
 
-def set_brand_footer(embed: discord.Embed, context: str | None = None) -> discord.Embed:
+def add_brand_footer(content: str, context: str | None = None) -> str:
     footer_text = FOOTER_TEXT if context is None else f"{context} • {FOOTER_TEXT}"
-    embed.set_footer(text=footer_text)
-    return embed
+    return f"{content}\n\n-{footer_text}"
 
 
-def build_session_embed(session: dict, player_ids: list[int] | None = None) -> discord.Embed:
+def build_session_content(session: dict, player_ids: list[int] | None = None) -> str:
     if player_ids is None:
         player_ids = []
     start_dt = datetime.fromisoformat(session["start_time_utc"])
@@ -47,19 +45,17 @@ def build_session_embed(session: dict, player_ids: list[int] | None = None) -> d
     player_count = len(player_ids)
     max_players = session["max_players"]
 
-    embed = discord.Embed(
-        title=f"{session['company_name']} - Hosted by {session.get('host_name') or 'Unknown host'}",
-        color=STATUS_COLORS[status],
-    )
-
+    lines = [
+        f"**{session['company_name']}** - Hosted by {session.get('host_name') or 'Unknown host'}"
+    ]
     if session.get("description"):
-        embed.description = session["description"]
+        lines.extend(["", session["description"]])
 
     if status == "pending":
         timestamp = int(start_dt.timestamp())
-        embed.add_field(name="⏰ Starts", value=f"<t:{timestamp}:R> (<t:{timestamp}:F>)", inline=False)
+        lines.extend(["", f"⏰ **Starts:** <t:{timestamp}:R> (<t:{timestamp}:F>)"])
     else:
-        embed.add_field(name="📌 Status", value=STATUS_LABELS[status], inline=False)
+        lines.extend(["", f"📌 **Status:** {STATUS_LABELS[status]}"])
 
     if player_ids:
         mentions = [f"<@{uid}>" for uid in player_ids]
@@ -78,15 +74,14 @@ def build_session_embed(session: dict, player_ids: list[int] | None = None) -> d
     else:
         player_text = "*No players joined yet*"
 
-    embed.add_field(name=f"👥 Players ({player_count}/{max_players})", value=player_text, inline=False)
+    lines.extend(["", f"👥 **Players ({player_count}/{max_players}):**", player_text])
 
     if session.get("logo_url"):
-        embed.set_thumbnail(url=session["logo_url"])
-    return set_brand_footer(embed, f"Session #{session['id']}")
+        lines.extend(["", f"🖼️ Logo: {session['logo_url']}"])
+    return add_brand_footer("\n".join(lines), f"Session #{session['id']}")
 
 
-def build_start_dm_embed(session: dict) -> discord.Embed:
-    server_text = session.get("server_name") or "Not specified"
+def build_start_dm_content(session: dict) -> str:
     description = (
         "The session is about to begin!\n\n"
         "**How to join:**\n"
@@ -101,31 +96,19 @@ def build_start_dm_embed(session: dict) -> discord.Embed:
         description += f"3. Search for company: **\"{session['company_name']}\"**\n\n"
     description += "Have fun!"
 
-    embed = discord.Embed(
-        title="SESSION STARTING",
-        description=description,
-        color=BRAND_GOLD,
-    )
-    if session.get("logo_url"):
-        embed.set_thumbnail(url=session["logo_url"])
-    return set_brand_footer(embed, f"Session #{session['id']}")
+    return add_brand_footer(f"**SESSION STARTING**\n\n{description}", f"Session #{session['id']}")
 
 
-def build_reminder_dm_embed(session: dict) -> discord.Embed:
+def build_reminder_dm_content(session: dict) -> str:
     start_dt = datetime.fromisoformat(session["start_time_utc"])
     timestamp = int(start_dt.timestamp())
-    embed = discord.Embed(
-        title="SESSION STARTING SOON",
-        description=(
+    content = (
+            "**SESSION STARTING SOON**\n\n"
             f"Your **{session['company_name']}** session starts <t:{timestamp}:R>.\n\n"
             f"**Session details:** {session.get('description') or 'No additional details provided.'}\n\n"
             "You will receive another message shortly with instructions on how to join."
-        ),
-        color=BRAND_GOLD,
     )
-    if session.get("logo_url"):
-        embed.set_thumbnail(url=session["logo_url"])
-    return set_brand_footer(embed, f"Session #{session['id']}")
+    return add_brand_footer(content, f"Session #{session['id']}")
 
 
 class EditServerModal(discord.ui.Modal, title="Change Server Name"):
@@ -276,8 +259,8 @@ class SessionView(discord.ui.View):
             await interaction.response.send_message("You already joined this session.", ephemeral=True)
             return
         player_ids = await database.get_players(self.session_id)
-        embed = build_session_embed(session, player_ids)
-        await interaction.response.edit_message(embed=embed, view=self)
+        content = build_session_content(session, player_ids)
+        await interaction.response.edit_message(content=content, view=self)
 
     @discord.ui.button(label="Leave", style=discord.ButtonStyle.red)
     async def leave_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -290,8 +273,8 @@ class SessionView(discord.ui.View):
             await interaction.response.send_message("You hadn't joined this session.", ephemeral=True)
             return
         player_ids = await database.get_players(self.session_id)
-        embed = build_session_embed(session, player_ids)
-        await interaction.response.edit_message(embed=embed, view=self)
+        content = build_session_content(session, player_ids)
+        await interaction.response.edit_message(content=content, view=self)
 
     @discord.ui.button(label="⚙️ Host Settings", style=discord.ButtonStyle.grey)
     async def settings_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -309,18 +292,18 @@ class SessionView(discord.ui.View):
             return
 
         view = HostSettingsControlView(self.session_id, interaction.client)
-        embed = discord.Embed(
-            title=f"⚙️ Host Controls — Session #{self.session_id}",
-            description=(
+        content = (
+                f"⚙️ **Host Controls — Session #{self.session_id}**\n\n"
                 f"**Company:** {session['company_name']}\n"
                 f"**Server:** {session.get('server_name') or 'Not specified'}\n"
                 f"**Player Limit:** {session['max_players']}\n\n"
                 "Select an option below to update session settings or cancel the session."
-            ),
-            color=BLURPLE,
         )
-        set_brand_footer(embed, f"Session #{self.session_id}")
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.send_message(
+            content=add_brand_footer(content, f"Session #{self.session_id}"),
+            view=view,
+            ephemeral=True,
+        )
 
 
 class Session(commands.GroupCog, name="session"):
@@ -395,9 +378,9 @@ class Session(commands.GroupCog, name="session"):
         )
         session = await database.get_session(session_id)
         view = SessionView(session_id)
-        embed = build_session_embed(session, [])
+        content = build_session_content(session, [])
         await interaction.response.defer(ephemeral=True)
-        message = await interaction.channel.send(embed=embed, view=view)
+        message = await interaction.channel.send(content=content, view=view)
         await database.set_session_message(session_id, message.id)
         await interaction.followup.send(
             f"✅ Session **#{session_id}** created. Use `/session cancel {session_id}` to cancel it.",
@@ -411,16 +394,14 @@ class Session(commands.GroupCog, name="session"):
 
         await database.set_session_status(session_id, "cancelled")
         player_ids = await database.get_players(session_id)
-        cancel_embed = discord.Embed(
-            title="❌ Session Cancelled",
-            description=f"The session **{session['company_name']}** (Session #{session_id}) has been cancelled by the host.",
-            color=RED,
+        cancel_content = add_brand_footer(
+            f"❌ **Session Cancelled**\n\nThe session **{session['company_name']}** "
+            f"(Session #{session_id}) has been cancelled by the host."
         )
-        set_brand_footer(cancel_embed)
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                await user.send(embed=cancel_embed)
+                await user.send(content=cancel_content)
             except discord.Forbidden:
                 pass
 
@@ -529,13 +510,11 @@ class Session(commands.GroupCog, name="session"):
             body = "No one has joined yet."
         else:
             body = "\n".join(f"<@{uid}>" for uid in player_ids)
-        embed = discord.Embed(
-            title=f"Players — {session['company_name']} (Session #{session_id})",
-            description=body,
-            color=BLURPLE,
+        content = add_brand_footer(
+            f"**Players — {session['company_name']} (Session #{session_id})**\n\n{body}",
+            f"{len(player_ids)}/{session['max_players']} joined",
         )
-        set_brand_footer(embed, f"{len(player_ids)}/{session['max_players']} joined")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(content=content, ephemeral=True)
 
     @app_commands.command(name="list", description="List upcoming sessions in this server")
     async def list_sessions(self, interaction: discord.Interaction) -> None:
@@ -552,9 +531,9 @@ class Session(commands.GroupCog, name="session"):
                 f"**#{session['id']}** — {session['company_name']} — "
                 f"<t:{int(start_dt.timestamp())}:R> — {count}/{session['max_players']}"
             )
-        embed = discord.Embed(title="Upcoming Sessions", description="\n".join(lines), color=BLURPLE)
-        set_brand_footer(embed)
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(
+            content=add_brand_footer("**Upcoming Sessions**\n\n" + "\n".join(lines))
+        )
 
     @app_commands.command(name="info", description="View details of a session")
     @app_commands.describe(session_id="The ID of the session to view")
@@ -564,7 +543,9 @@ class Session(commands.GroupCog, name="session"):
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
         player_ids = await database.get_players(session_id)
-        await interaction.response.send_message(embed=build_session_embed(session, player_ids), ephemeral=True)
+        await interaction.response.send_message(
+            content=build_session_content(session, player_ids), ephemeral=True
+        )
 
     @app_commands.command(name="show", description="Repost a session's Join/Leave message for everyone")
     @app_commands.describe(session_id="The ID of the session to show")
@@ -575,7 +556,9 @@ class Session(commands.GroupCog, name="session"):
             return
         player_ids = await database.get_players(session_id)
         view = SessionView(session_id) if session["status"] == "pending" else None
-        await interaction.response.send_message(embed=build_session_embed(session, player_ids), view=view)
+        await interaction.response.send_message(
+            content=build_session_content(session, player_ids), view=view
+        )
 
     @app_commands.command(name="kick", description="Remove a player from a session (host/admin only)")
     @app_commands.describe(session_id="The ID of the session", user="The player to remove")
@@ -685,15 +668,13 @@ class Session(commands.GroupCog, name="session"):
 
         await interaction.response.defer(ephemeral=True)
         player_ids = await database.get_players(session_id)
-        thanks = discord.Embed(
-            description=f"🙏 Thanks for joining the **{session['company_name']}** session!",
-            color=GREY,
+        thanks = add_brand_footer(
+            f"🙏 Thanks for joining the **{session['company_name']}** session!"
         )
-        set_brand_footer(thanks)
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                await user.send(embed=thanks)
+                await user.send(content=thanks)
             except discord.Forbidden:
                 pass
         await database.set_session_status(session_id, "ended")
@@ -713,9 +694,9 @@ class Session(commands.GroupCog, name="session"):
             lines.append(
                 f"**#{session['id']}** — {session['company_name']} — {count}/{session['max_players']} joined"
             )
-        embed = discord.Embed(title="Active Sessions", description="\n".join(lines), color=BLURPLE)
-        set_brand_footer(embed)
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(
+            content=add_brand_footer("**Active Sessions**\n\n" + "\n".join(lines))
+        )
 
     @app_commands.command(name="help", description="Show the /session commands available to you")
     async def help_command(self, interaction: discord.Interaction) -> None:
@@ -727,23 +708,19 @@ class Session(commands.GroupCog, name="session"):
             host_role_id=host_role_id,
         )
 
-        embed = discord.Embed(title="Session Commands", color=BLURPLE)
-        set_brand_footer(embed)
-        embed.add_field(
-            name="Everyone",
-            value=(
+        sections = [
+            "**Session Commands**",
+            "",
+            "**Everyone**\n"
                 "`/session list` — list upcoming sessions\n"
                 "`/session active` — list currently running sessions\n"
                 "`/session info <id>` — view a session's details\n"
                 "`/session show <id>` — repost a session's Join/Leave message\n"
-                "`/session help` — show this message"
-            ),
-            inline=False,
-        )
+                "`/session help` — show this message",
+        ]
         if is_host:
-            embed.add_field(
-                name="Host",
-                value=(
+            sections.extend([
+                "**Host**\n"
                     "`/session host` — host a new session\n"
                     "`/session cancel <id>` — cancel a pending session\n"
                     "`/session setlimit <id> <limit>` — change player limit\n"
@@ -752,17 +729,15 @@ class Session(commands.GroupCog, name="session"):
                     "`/session end <id>` — end an active session\n"
                     "`/session players <id>` — view who joined a session\n"
                     "`/session kick <id> <user>` — remove a player from a session\n"
-                    "`/session add <id> <user>` — add a player to a session"
-                ),
-                inline=False,
-            )
+                    "`/session add <id> <user>` — add a player to a session",
+            ])
         if is_admin:
-            embed.add_field(
-                name="Admin",
-                value="`/session hostrole <role>` — set the role allowed to host sessions",
-                inline=False,
-            )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            sections.extend([
+                "**Admin**\n`/session hostrole <role>` — set the role allowed to host sessions"
+            ])
+        await interaction.response.send_message(
+            content=add_brand_footer("\n\n".join(sections)), ephemeral=True
+        )
 
     @hostrole.error
     async def hostrole_error(
@@ -793,10 +768,10 @@ class Session(commands.GroupCog, name="session"):
         except discord.NotFound:
             return
         player_ids = await database.get_players(session["id"])
-        embed = build_session_embed({**session, "status": status}, player_ids)
-        await message.edit(embed=embed, view=view)
+        content = build_session_content({**session, "status": status}, player_ids)
+        await message.edit(content=content, view=view)
 
-    async def _send_session_dm(self, session: dict, embed: discord.Embed) -> bool:
+    async def _send_session_dm(self, session: dict, content: str) -> bool:
         player_ids = await database.get_players(session["id"])
         if not player_ids:
             return False
@@ -805,7 +780,7 @@ class Session(commands.GroupCog, name="session"):
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                await user.send(embed=embed)
+                await user.send(content=content)
             except discord.Forbidden:
                 logger.warning("Cannot DM user %s for session %s", user_id, session["id"])
             except discord.HTTPException:
@@ -815,12 +790,12 @@ class Session(commands.GroupCog, name="session"):
         return sent
 
     async def _send_reminder_dm(self, session: dict) -> None:
-        if await self._send_session_dm(session, build_reminder_dm_embed(session)):
+        if await self._send_session_dm(session, build_reminder_dm_content(session)):
             await database.mark_session_reminder_sent(session["id"])
             session["reminder_sent"] = 1
 
     async def _send_start_dm(self, session: dict) -> None:
-        if await self._send_session_dm(session, build_start_dm_embed(session)):
+        if await self._send_session_dm(session, build_start_dm_content(session)):
             await database.mark_session_start_dm_sent(session["id"])
             session["start_dm_sent"] = 1
 
