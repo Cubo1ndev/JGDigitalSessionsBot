@@ -29,7 +29,8 @@ NO_MENTIONS = discord.AllowedMentions(
     everyone=False, users=False, roles=False, replied_user=False
 )
 logger = logging.getLogger(__name__)
-BANNER_BACKDROP_PATH = Path(__file__).resolve().parent.parent / "assets" / "session-backdrop.png"
+BANNER_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+BANNER_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 STATUS_LABELS = {
     "fired": "Started — check your DMs!",
@@ -122,11 +123,22 @@ def _fit_banner_font(
     return _banner_font(24, bold)
 
 
+def get_banner_paths() -> list[Path]:
+    if not BANNER_ASSETS_DIR.exists():
+        return []
+    return sorted(
+        path for path in BANNER_ASSETS_DIR.iterdir()
+        if path.is_file() and path.suffix.lower() in BANNER_EXTENSIONS
+    )
+
+
 def build_session_banner(session: dict) -> discord.File:
-    width, height = 1200, 360
-    if BANNER_BACKDROP_PATH.exists():
+    width, height = 1200, 280
+    backdrop_paths = get_banner_paths()
+    backdrop_path = backdrop_paths[(session.get("banner_index") or 0) % len(backdrop_paths)] if backdrop_paths else None
+    if backdrop_path is not None:
         image = ImageOps.fit(
-            Image.open(BANNER_BACKDROP_PATH).convert("RGB"),
+            Image.open(backdrop_path).convert("RGB"),
             (width, height),
             method=Image.Resampling.LANCZOS,
             centering=(0.5, 0.46),
@@ -139,7 +151,7 @@ def build_session_banner(session: dict) -> discord.File:
         image = Image.new("RGBA", (width, height), (17, 20, 28, 255))
     draw = ImageDraw.Draw(image)
 
-    if not BANNER_BACKDROP_PATH.exists():
+    if backdrop_path is None:
         for x in range(width):
             blend = x / width
             color = (
@@ -149,9 +161,6 @@ def build_session_banner(session: dict) -> discord.File:
                 255,
             )
             draw.line((x, 0, x, height), fill=color)
-
-    for offset in range(-height, width, 90):
-        draw.line((offset, height, offset + height, 0), fill=(31, 34, 45, 70), width=2)
 
     title = session.get("company_name") or "Session"
     host_name = session.get("host_name") or "Unknown host"
@@ -167,14 +176,14 @@ def build_session_banner(session: dict) -> discord.File:
         draw.text((width // 2, y), text, font=font, fill=fill, anchor="mm")
 
     draw.text(
-        (width // 2 + 3, 135 + 4),
+        (width // 2 + 3, 104 + 3),
         title,
         font=title_font,
         fill=(4, 7, 12, 230),
         anchor="mm",
     )
-    centered_text(title, 135, title_font, (255, 255, 255))
-    centered_text(f"Hosted by {host_name[:48]}", 232, host_font, (224, 231, 242))
+    centered_text(title, 104, title_font, (255, 255, 255))
+    centered_text(f"Hosted by {host_name[:48]}", 171, host_font, (224, 231, 242))
 
     buffer = BytesIO()
     image.convert("RGB").save(buffer, format="PNG", optimize=True)
@@ -664,6 +673,9 @@ class Session(commands.GroupCog, name="session"):
             server_name=server_name,
             host_name=host_name.strip() if host_name and host_name.strip() else interaction.user.display_name,
         )
+        banner_paths = get_banner_paths()
+        banner_index = await database.get_next_banner_index(len(banner_paths))
+        await database.set_session_banner_index(session_id, banner_index)
         session = await database.get_session(session_id)
         view = SessionView(session_id)
         view.set_session_content(session, [])

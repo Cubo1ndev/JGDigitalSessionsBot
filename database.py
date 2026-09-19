@@ -25,6 +25,7 @@ async def init_db() -> None:
                 channel_id     TEXT    NOT NULL,
                 message_id     TEXT,
                 thread_id      TEXT,
+                banner_index   INTEGER,
                 host_id        TEXT    NOT NULL,
                 host_name      TEXT,
                 company_name   TEXT    NOT NULL,
@@ -43,6 +44,7 @@ async def init_db() -> None:
             "logo_url": "TEXT",
             "server_name": "TEXT",
             "thread_id": "TEXT",
+            "banner_index": "INTEGER",
             "host_name": "TEXT",
             "reminder_sent": "INTEGER NOT NULL DEFAULT 0",
             "start_dm_sent": "INTEGER NOT NULL DEFAULT 0",
@@ -59,6 +61,12 @@ async def init_db() -> None:
             CREATE TABLE IF NOT EXISTS host_roles (
                 guild_id TEXT PRIMARY KEY,
                 role_id  TEXT NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bot_state (
+                key   TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
             )
         """)
         await db.commit()
@@ -156,6 +164,34 @@ async def set_session_thread(session_id: int, thread_id: int) -> None:
             "UPDATE sessions SET thread_id = ? WHERE id = ?", (str(thread_id), session_id)
         )
         await db.commit()
+
+
+async def set_session_banner_index(session_id: int, banner_index: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "UPDATE sessions SET banner_index = ? WHERE id = ?",
+            (banner_index, session_id),
+        )
+        await db.commit()
+
+
+async def get_next_banner_index(image_count: int) -> int:
+    if image_count <= 0:
+        return 0
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute(
+            "SELECT value FROM bot_state WHERE key = 'banner_index'"
+        ) as cur:
+            row = await cur.fetchone()
+        index = int(row[0]) if row else 0
+        await db.execute(
+            "INSERT INTO bot_state (key, value) VALUES ('banner_index', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ((index + 1) % image_count,),
+        )
+        await db.commit()
+    return index % image_count
 
 
 async def get_session(session_id: int) -> dict | None:
