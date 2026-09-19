@@ -269,7 +269,7 @@ class SessionView(discord.ui.LayoutView):
             self.controls.add_item(self.leave_button)
             self.controls.add_item(self.settings_button)
             children.extend([discord.ui.Separator(), self.controls])
-        self.container = discord.ui.Container(*children, accent_color=BRAND_GOLD)
+        self.container = discord.ui.Container(*children)
         self.add_item(self.container)
         if content is not None:
             self.set_content(content)
@@ -279,9 +279,7 @@ class SessionView(discord.ui.LayoutView):
         self.body.content = body if separator else content
         self.footer.content = footer if separator else f"Session #{self.session_id}"
 
-    async def _join_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    async def _join_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
         if session is None or session["status"] != "pending":
             await interaction.response.send_message("This session is no longer open.", ephemeral=True)
@@ -299,9 +297,7 @@ class SessionView(discord.ui.LayoutView):
         self.set_content(content)
         await interaction.response.edit_message(view=self)
 
-    async def _leave_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    async def _leave_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
         if session is None or session["status"] != "pending":
             await interaction.response.send_message("This session is no longer open.", ephemeral=True)
@@ -315,9 +311,7 @@ class SessionView(discord.ui.LayoutView):
         self.set_content(content)
         await interaction.response.edit_message(view=self)
 
-    async def _settings_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
+    async def _settings_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
         if session is None:
             await interaction.response.send_message("Session not found.", ephemeral=True)
@@ -344,6 +338,19 @@ class SessionView(discord.ui.LayoutView):
             view=view,
             ephemeral=True,
         )
+
+    async def on_error(
+        self,
+        interaction: discord.Interaction,
+        error: Exception,
+        item: discord.ui.Item,
+    ) -> None:
+        logger.exception("Session component failed", exc_info=error)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "Something went wrong while updating this session. Please try again.",
+                ephemeral=True,
+            )
 
 
 class Session(commands.GroupCog, name="session"):
