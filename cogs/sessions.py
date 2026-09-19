@@ -236,16 +236,52 @@ class HostSettingsControlView(discord.ui.View):
             await interaction.response.send_message("Could not perform action.", ephemeral=True)
 
 
-class SessionView(discord.ui.View):
-    def __init__(self, session_id: int) -> None:
+class SessionView(discord.ui.LayoutView):
+    def __init__(
+        self,
+        session_id: int,
+        content: str | None = None,
+        show_controls: bool = True,
+    ) -> None:
         super().__init__(timeout=None)
         self.session_id = session_id
-        self.join_button.custom_id = f"session_join:{session_id}"
-        self.leave_button.custom_id = f"session_leave:{session_id}"
-        self.settings_button.custom_id = f"session_settings:{session_id}"
+        self.body = discord.ui.TextDisplay("Session details unavailable.")
+        self.footer = discord.ui.TextDisplay(f"Session #{session_id}")
+        children = [self.body, discord.ui.Separator(), self.footer]
+        if show_controls:
+            self.controls = discord.ui.ActionRow()
+            self.join_button = discord.ui.Button(
+                label="Join", style=discord.ButtonStyle.green,
+                custom_id=f"session_join:{session_id}",
+            )
+            self.leave_button = discord.ui.Button(
+                label="Leave", style=discord.ButtonStyle.red,
+                custom_id=f"session_leave:{session_id}",
+            )
+            self.settings_button = discord.ui.Button(
+                label="⚙️ Host Settings", style=discord.ButtonStyle.grey,
+                custom_id=f"session_settings:{session_id}",
+            )
+            self.join_button.callback = self._join_button
+            self.leave_button.callback = self._leave_button
+            self.settings_button.callback = self._settings_button
+            self.controls.add_item(self.join_button)
+            self.controls.add_item(self.leave_button)
+            self.controls.add_item(self.settings_button)
+            children.extend([discord.ui.Separator(), self.controls])
+        self.container = discord.ui.Container(*children, accent_color=BRAND_GOLD)
+        self.add_item(self.container)
+        if content is not None:
+            self.set_content(content)
 
-    @discord.ui.button(label="Join", style=discord.ButtonStyle.green)
-    async def join_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    def set_content(self, content: str) -> None:
+        body, separator, footer = content.rpartition("\n\n-")
+        self.body.content = body if separator else content
+        self.footer.content = footer if separator else f"Session #{self.session_id}"
+
+    async def _join_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
         session = await database.get_session(self.session_id)
         if session is None or session["status"] != "pending":
             await interaction.response.send_message("This session is no longer open.", ephemeral=True)
@@ -260,10 +296,12 @@ class SessionView(discord.ui.View):
             return
         player_ids = await database.get_players(self.session_id)
         content = build_session_content(session, player_ids)
-        await interaction.response.edit_message(content=content, view=self)
+        self.set_content(content)
+        await interaction.response.edit_message(view=self)
 
-    @discord.ui.button(label="Leave", style=discord.ButtonStyle.red)
-    async def leave_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _leave_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
         session = await database.get_session(self.session_id)
         if session is None or session["status"] != "pending":
             await interaction.response.send_message("This session is no longer open.", ephemeral=True)
@@ -274,10 +312,12 @@ class SessionView(discord.ui.View):
             return
         player_ids = await database.get_players(self.session_id)
         content = build_session_content(session, player_ids)
-        await interaction.response.edit_message(content=content, view=self)
+        self.set_content(content)
+        await interaction.response.edit_message(view=self)
 
-    @discord.ui.button(label="⚙️ Host Settings", style=discord.ButtonStyle.grey)
-    async def settings_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _settings_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
         session = await database.get_session(self.session_id)
         if session is None:
             await interaction.response.send_message("Session not found.", ephemeral=True)
@@ -377,10 +417,10 @@ class Session(commands.GroupCog, name="session"):
             host_name=host_name.strip() if host_name and host_name.strip() else interaction.user.display_name,
         )
         session = await database.get_session(session_id)
-        view = SessionView(session_id)
         content = build_session_content(session, [])
+        view = SessionView(session_id, content)
         await interaction.response.defer(ephemeral=True)
-        message = await interaction.channel.send(content=content, view=view)
+        message = await interaction.channel.send(view=view)
         await database.set_session_message(session_id, message.id)
         await interaction.followup.send(
             f"✅ Session **#{session_id}** created. Use `/session cancel {session_id}` to cancel it.",
@@ -555,9 +595,10 @@ class Session(commands.GroupCog, name="session"):
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
         player_ids = await database.get_players(session_id)
-        view = SessionView(session_id) if session["status"] == "pending" else None
+        content = build_session_content(session, player_ids)
+        view = SessionView(session_id, content) if session["status"] == "pending" else None
         await interaction.response.send_message(
-            content=build_session_content(session, player_ids), view=view
+            content=content if view is None else None, view=view
         )
 
     @app_commands.command(name="kick", description="Remove a player from a session (host/admin only)")
@@ -769,7 +810,11 @@ class Session(commands.GroupCog, name="session"):
             return
         player_ids = await database.get_players(session["id"])
         content = build_session_content({**session, "status": status}, player_ids)
-        await message.edit(content=content, view=view)
+        if isinstance(view, SessionView):
+            view.set_content(content)
+        elif view is None:
+            view = SessionView(session["id"], content, show_controls=False)
+        await message.edit(view=view)
 
     async def _send_session_dm(self, session: dict, content: str) -> bool:
         player_ids = await database.get_players(session["id"])
