@@ -103,6 +103,21 @@ def _banner_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | Imag
     return ImageFont.load_default()
 
 
+def _fit_banner_font(
+    text: str,
+    max_size: int,
+    max_width: int,
+    bold: bool = False,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    size = max_size
+    while size > 24:
+        font = _banner_font(size, bold)
+        if ImageDraw.Draw(Image.new("RGB", (1, 1))).textbbox((0, 0), text, font=font)[2] <= max_width:
+            return font
+        size -= 2
+    return _banner_font(24, bold)
+
+
 def build_session_banner(session: dict) -> discord.File:
     width, height = 1200, 320
     image = Image.new("RGB", (width, height), (24, 26, 32))
@@ -118,17 +133,23 @@ def build_session_banner(session: dict) -> discord.File:
         draw.line((x, 0, x, height), fill=color)
 
     draw.rounded_rectangle((28, 28, width - 28, height - 28), radius=18, outline=(70, 74, 84), width=2)
-    draw.rectangle((28, 28, 34, height - 28), fill=(236, 126, 24))
+    draw.rounded_rectangle((width // 2 - 110, 42, width // 2 + 110, 48), radius=3, fill=(236, 126, 24))
     draw.ellipse((width - 230, -80, width + 80, 230), fill=(46, 48, 58))
     draw.ellipse((width - 160, 90, width + 100, 350), fill=(34, 36, 44))
 
-    title_font = _banner_font(92, bold=True)
-    host_font = _banner_font(38)
-    label_font = _banner_font(22, bold=True)
+    title = session.get("company_name") or "Session"
     host_name = session.get("host_name") or "Unknown host"
-    draw.text((78, 62), "SESSION", font=title_font, fill=(248, 249, 250))
-    draw.text((82, 177), "HOSTED BY", font=label_font, fill=(236, 126, 24))
-    draw.text((82, 208), host_name[:48], font=host_font, fill=(214, 217, 224))
+    label_font = _banner_font(22, bold=True)
+    title_font = _fit_banner_font(title, 82, 980, bold=True)
+    host_font = _fit_banner_font(f"Hosted by {host_name[:48]}", 38, 900)
+
+    def centered_text(text: str, y: int, font: ImageFont.ImageFont, fill: tuple[int, int, int]) -> None:
+        bounds = draw.textbbox((0, 0), text, font=font)
+        draw.text(((width - (bounds[2] - bounds[0])) / 2, y), text, font=font, fill=fill)
+
+    centered_text("SESSION", 78, label_font, (236, 126, 24))
+    centered_text(title, 112, title_font, (248, 249, 250))
+    centered_text(f"Hosted by {host_name[:48]}", 220, host_font, (214, 217, 224))
 
     buffer = BytesIO()
     image.save(buffer, format="PNG", optimize=True)
@@ -308,11 +329,8 @@ class SessionView(discord.ui.LayoutView):
         self.description = discord.ui.TextDisplay("No description provided.")
         self.schedule = discord.ui.TextDisplay("Starts\nNot scheduled")
         self.players = discord.ui.TextDisplay("Players (0/0)\nNo players joined yet.")
+        children = [self.header, self.description, self.schedule, self.players]
         self.add_item(self.banner)
-        self.add_item(discord.ui.Container(self.header))
-        self.add_item(discord.ui.Container(self.description))
-        self.add_item(discord.ui.Container(self.schedule))
-        self.add_item(discord.ui.Container(self.players))
         if show_controls:
             self.controls = discord.ui.ActionRow()
             self.join_button = discord.ui.Button(
@@ -333,8 +351,12 @@ class SessionView(discord.ui.LayoutView):
             self.controls.add_item(self.join_button)
             self.controls.add_item(self.leave_button)
             self.controls.add_item(self.settings_button)
-            self.add_item(discord.ui.Separator(spacing=discord.SeparatorSpacing.large))
-            self.add_item(discord.ui.Container(self.controls))
+            children.extend([
+                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+                self.controls,
+            ])
+        self.container = discord.ui.Container(*children)
+        self.add_item(self.container)
     def set_session_content(self, session: dict, player_ids: list[int] | None = None) -> None:
         header, description, schedule, players = build_session_sections(session, player_ids)
         self.header.content = header
