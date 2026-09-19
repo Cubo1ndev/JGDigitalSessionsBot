@@ -122,27 +122,42 @@ def _fit_banner_font(
 
 
 def build_session_banner(session: dict) -> discord.File:
-    width, height = 1200, 320
-    image = Image.new("RGB", (width, height), (24, 26, 32))
+    width, height = 1200, 360
+    image = Image.new("RGB", (width, height), (17, 20, 28))
     draw = ImageDraw.Draw(image)
 
     for x in range(width):
         blend = x / width
         color = (
-            int(24 + 20 * blend),
-            int(26 + 8 * blend),
-            int(32 + 2 * blend),
+            int(17 + 24 * blend),
+            int(20 + 4 * blend),
+            int(28 + 11 * blend),
         )
         draw.line((x, 0, x, height), fill=color)
 
-    draw.rounded_rectangle((28, 28, width - 28, height - 28), radius=18, outline=(70, 74, 84), width=2)
-    draw.ellipse((width - 230, -80, width + 80, 230), fill=(46, 48, 58))
-    draw.ellipse((width - 160, 90, width + 100, 350), fill=(34, 36, 44))
+    for offset in range(-height, width, 90):
+        draw.line((offset, height, offset + height, 0), fill=(31, 34, 45), width=2)
+
+    draw.ellipse((width // 2 - 280, -210, width // 2 + 280, 350), fill=(35, 31, 43))
+    draw.ellipse((width // 2 - 190, -120, width // 2 + 190, 260), fill=(39, 34, 45))
+    draw.rounded_rectangle(
+        (28, 28, width - 28, height - 28),
+        radius=22,
+        fill=(20, 22, 30),
+        outline=(78, 82, 96),
+        width=2,
+    )
+    draw.rounded_rectangle(
+        (width // 2 - 260, 54, width // 2 + 260, height - 54),
+        radius=18,
+        outline=(52, 56, 70),
+        width=2,
+    )
 
     title = session.get("company_name") or "Session"
     host_name = session.get("host_name") or "Unknown host"
-    title_font = _fit_banner_font(title, 112, 980, bold=True)
-    host_font = _fit_banner_font(f"Hosted by {host_name[:48]}", 48, 900)
+    title_font = _fit_banner_font(title, 104, 940, bold=True)
+    host_font = _fit_banner_font(f"Hosted by {host_name[:48]}", 42, 820)
 
     def centered_text(
         text: str,
@@ -152,8 +167,23 @@ def build_session_banner(session: dict) -> discord.File:
     ) -> None:
         draw.text((width // 2, y), text, font=font, fill=fill, anchor="mm")
 
-    centered_text(title, 132, title_font, (248, 249, 250))
-    centered_text(f"Hosted by {host_name[:48]}", 210, host_font, (214, 217, 224))
+    title_box = draw.textbbox((0, 0), title, font=title_font)
+    title_width = title_box[2] - title_box[0]
+    draw.text(
+        (width // 2 + 3, 135 + 4),
+        title,
+        font=title_font,
+        fill=(8, 10, 15),
+        anchor="mm",
+    )
+    centered_text(title, 135, title_font, (248, 249, 250))
+    draw.rounded_rectangle(
+        (width // 2 - min(title_width // 2, 250), 190,
+         width // 2 + min(title_width // 2, 250), 194),
+        radius=2,
+        fill=(111, 180, 255),
+    )
+    centered_text(f"Hosted by {host_name[:48]}", 232, host_font, (190, 198, 214))
 
     buffer = BytesIO()
     image.save(buffer, format="PNG", optimize=True)
@@ -189,34 +219,43 @@ async def sync_session_thread_member(
         )
 
 
-def build_start_dm_content(session: dict) -> str:
-    description = (
-        "The session is about to begin!\n\n"
-        "**How to join:**\n"
+def build_session_dm_view(title: str, sections: list[str]) -> discord.ui.LayoutView:
+    children: list[discord.ui.Item] = [discord.ui.TextDisplay(f"# {title}")]
+    for section in sections:
+        children.extend([
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+            discord.ui.TextDisplay(section),
+        ])
+    view = discord.ui.LayoutView(timeout=180)
+    view.add_item(discord.ui.Container(*children))
+    return view
+
+
+def build_start_dm_content(session: dict) -> tuple[str, list[str]]:
+    instructions = (
+        "The session is about to begin.\n\n"
+        "**How to join**\n"
         "1. Open the game.\n"
         "2. In the main menu, click **Servers**.\n"
     )
     if session.get("server_name"):
-        description += (
+        instructions += (
             f"3. Search for server: **\"{session['server_name']}\"**\n"
         )
     else:
-        description += f"3. Search for company: **\"{session['company_name']}\"**\n\n"
-    description += "Have fun!"
+        instructions += f"3. Search for company: **\"{session['company_name']}\"**\n"
+    instructions += "\nHave fun!"
+    return "Session Starting", [instructions]
 
-    return add_brand_footer(f"**SESSION STARTING**\n\n{description}", f"Session #{session['id']}")
 
-
-def build_reminder_dm_content(session: dict) -> str:
+def build_reminder_dm_content(session: dict) -> tuple[str, list[str]]:
     start_dt = datetime.fromisoformat(session["start_time_utc"])
     timestamp = int(start_dt.timestamp())
-    content = (
-            "**SESSION STARTING SOON**\n\n"
-            f"Your **{session['company_name']}** session starts <t:{timestamp}:R>.\n\n"
-            f"**Session details:** {session.get('description') or 'No additional details provided.'}\n\n"
-            "You will receive another message shortly with instructions on how to join."
-    )
-    return add_brand_footer(content, f"Session #{session['id']}")
+    return "Session Starting Soon", [
+        f"Your **{session['company_name']}** session starts <t:{timestamp}:R>.",
+        f"**Session details**\n{session.get('description') or 'No additional details provided.'}",
+        "You will receive another message shortly with instructions on how to join.",
+    ]
 
 
 class EditServerModal(discord.ui.Modal, title="Change Server Name"):
@@ -312,24 +351,109 @@ class EditLimitModal(discord.ui.Modal, title="Change Player Limit"):
         )
 
 
-class HostSettingsControlView(discord.ui.View):
-    def __init__(self, session_id: int, bot: commands.Bot) -> None:
+class HostSettingsControlView(discord.ui.LayoutView):
+    def __init__(self, session_id: int, bot: commands.Bot, session: dict) -> None:
         super().__init__(timeout=180)
         self.session_id = session_id
         self.bot = bot
+        self.summary = discord.ui.TextDisplay(
+            f"# Host Settings\n"
+            f"**{session['company_name']}**\n"
+            f"Server: {session.get('server_name') or 'Not specified'}\n"
+            f"Current player limit: {session['max_players']}"
+        )
+        limit_values = [1, 2, 4, 5, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100]
+        if session["max_players"] not in limit_values:
+            limit_values.append(session["max_players"])
+            limit_values.sort()
+        self.limit_select = discord.ui.Select(
+            placeholder="Select a player limit",
+            custom_id=f"session_limit:{session_id}",
+            options=[
+                discord.SelectOption(label=f"{value} players", value=str(value))
+                for value in limit_values[:25]
+            ],
+        )
+        self.limit_select.callback = self._limit_selected
+        self.limit_row = discord.ui.ActionRow(self.limit_select)
 
-    @discord.ui.button(label="🌐 Change Server", style=discord.ButtonStyle.blurple)
-    async def change_server_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.controls = discord.ui.ActionRow()
+        self.server_button = discord.ui.Button(
+            label="Change Server", emoji="🌐", style=discord.ButtonStyle.grey,
+            custom_id=f"session_server:{session_id}",
+        )
+        self.custom_limit_button = discord.ui.Button(
+            label="Custom Limit", emoji="✏️", style=discord.ButtonStyle.grey,
+            custom_id=f"session_custom_limit:{session_id}",
+        )
+        self.cancel_button = discord.ui.Button(
+            label="Cancel Session", style=discord.ButtonStyle.red,
+            custom_id=f"session_cancel:{session_id}",
+        )
+        self.server_button.callback = self._change_server
+        self.custom_limit_button.callback = self._change_limit
+        self.cancel_button.callback = self._cancel_session
+        self.controls.add_item(self.server_button)
+        self.controls.add_item(self.custom_limit_button)
+        self.controls.add_item(self.cancel_button)
+
+        self.add_item(
+            discord.ui.Container(
+                self.summary,
+                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+                discord.ui.TextDisplay("Choose a common limit below, or use Custom Limit."),
+                self.limit_row,
+                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+                self.controls,
+            )
+        )
+
+    async def _change_server(self, interaction: discord.Interaction) -> None:
         modal = EditServerModal(self.session_id, self.bot)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="👥 Change Player Limit", style=discord.ButtonStyle.blurple)
-    async def change_limit_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _change_limit(self, interaction: discord.Interaction) -> None:
         modal = EditLimitModal(self.session_id, self.bot)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="❌ Cancel Session", style=discord.ButtonStyle.red)
-    async def cancel_session_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _limit_selected(self, interaction: discord.Interaction) -> None:
+        session = await database.get_session(self.session_id)
+        if session is None:
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
+        if not can_manage_session(
+            interaction.user.guild_permissions.administrator,
+            interaction.user.id == int(session["host_id"]),
+        ):
+            await interaction.response.send_message(
+                "Only the host or an administrator can edit this session.", ephemeral=True
+            )
+            return
+        try:
+            value = validate_max_players(
+                int(self.limit_select.values[0]),
+                current_count=await database.count_players(self.session_id),
+            )
+        except ValueError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+        await database.update_session_max_players(self.session_id, value)
+        updated_session = await database.get_session(self.session_id)
+        cog = self.bot.get_cog("session")
+        if cog:
+            await cog._update_message(updated_session, updated_session["status"], SessionView(self.session_id))
+        self.summary.content = (
+            f"# Host Settings\n**{updated_session['company_name']}**\n"
+            f"Server: {updated_session.get('server_name') or 'Not specified'}\n"
+            f"Current player limit: {value}"
+        )
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send(
+            f"Player limit updated to **{value}** for session #{self.session_id}.",
+            ephemeral=True,
+        )
+
+    async def _cancel_session(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
         if session is None or session["status"] != "pending":
             await interaction.response.send_message("That session is no longer pending.", ephemeral=True)
@@ -342,6 +466,15 @@ class HostSettingsControlView(discord.ui.View):
             await interaction.followup.send(f"Session #{self.session_id} cancelled.", ephemeral=True)
         else:
             await interaction.response.send_message("Could not perform action.", ephemeral=True)
+
+    async def on_error(
+        self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item
+    ) -> None:
+        logger.exception("Host settings component failed", exc_info=error)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "Something went wrong while updating session settings.", ephemeral=True
+            )
 
 
 class SessionView(discord.ui.LayoutView):
@@ -450,16 +583,8 @@ class SessionView(discord.ui.LayoutView):
             )
             return
 
-        view = HostSettingsControlView(self.session_id, interaction.client)
-        content = (
-                f"⚙️ **Host Controls — Session #{self.session_id}**\n\n"
-                f"**Company:** {session['company_name']}\n"
-                f"**Server:** {session.get('server_name') or 'Not specified'}\n"
-                f"**Player Limit:** {session['max_players']}\n\n"
-                "Select an option below to update session settings or cancel the session."
-        )
+        view = HostSettingsControlView(self.session_id, interaction.client, session)
         await interaction.response.send_message(
-            content=add_brand_footer(content, f"Session #{self.session_id}"),
             view=view,
             ephemeral=True,
         )
@@ -558,14 +683,6 @@ class Session(commands.GroupCog, name="session"):
             allowed_mentions=NO_MENTIONS,
         )
         await database.set_session_message(session_id, message.id)
-        try:
-            thread = await message.create_thread(
-                name=f"{session['company_name']} Session #{session_id}"[:100],
-                auto_archive_duration=1440,
-            )
-            await database.set_session_thread(session_id, thread.id)
-        except discord.HTTPException:
-            logger.exception("Could not create thread for session %s", session_id)
         await interaction.followup.send(
             f"✅ Session **#{session_id}** created. Use `/session cancel {session_id}` to cancel it.",
             ephemeral=True,
@@ -587,6 +704,35 @@ class Session(commands.GroupCog, name="session"):
         except discord.HTTPException:
             logger.warning("Could not remove non-attendee message in thread %s", message.channel.id)
 
+    async def _create_session_thread(self, session: dict) -> None:
+        if session.get("thread_id") or not session.get("message_id"):
+            return
+        channel = self.bot.get_channel(int(session["channel_id"]))
+        if channel is None:
+            return
+        try:
+            message = await channel.fetch_message(int(session["message_id"]))
+            thread = await message.create_thread(
+                name=f"{session['company_name']} Session #{session['id']}"[:100],
+                auto_archive_duration=1440,
+            )
+            await database.set_session_thread(session["id"], thread.id)
+
+            attendee_ids = {int(session["host_id"]), *await database.get_players(session["id"])}
+            for user_id in attendee_ids:
+                user = self.bot.get_user(user_id)
+                if user is None:
+                    try:
+                        user = await self.bot.fetch_user(user_id)
+                    except discord.HTTPException:
+                        continue
+                try:
+                    await thread.add_user(user)
+                except discord.HTTPException:
+                    logger.warning("Could not add attendee %s to thread %s", user_id, thread.id)
+        except discord.HTTPException:
+            logger.exception("Could not create thread for session %s", session["id"])
+
     async def _cancel_session_internal(self, session_id: int) -> None:
         session = await database.get_session(session_id)
         if session is None or session["status"] != "pending":
@@ -594,14 +740,13 @@ class Session(commands.GroupCog, name="session"):
 
         await database.set_session_status(session_id, "cancelled")
         player_ids = await database.get_players(session_id)
-        cancel_content = add_brand_footer(
-            f"❌ **Session Cancelled**\n\nThe session **{session['company_name']}** "
-            f"(Session #{session_id}) has been cancelled by the host."
-        )
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                await user.send(content=cancel_content)
+                await user.send(view=build_session_dm_view(
+                    "Session Cancelled",
+                    [f"The **{session['company_name']}** session has been cancelled by the host."],
+                ))
             except discord.Forbidden:
                 pass
 
@@ -876,13 +1021,13 @@ class Session(commands.GroupCog, name="session"):
 
         await interaction.response.defer(ephemeral=True)
         player_ids = await database.get_players(session_id)
-        thanks = add_brand_footer(
-            f"🙏 Thanks for joining the **{session['company_name']}** session!"
-        )
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                await user.send(content=thanks)
+                await user.send(view=build_session_dm_view(
+                    "Session Complete",
+                    [f"Thanks for joining the **{session['company_name']}** session."],
+                ))
             except discord.Forbidden:
                 pass
         await database.set_session_status(session_id, "ended")
@@ -988,7 +1133,9 @@ class Session(commands.GroupCog, name="session"):
             allowed_mentions=NO_MENTIONS,
         )
 
-    async def _send_session_dm(self, session: dict, content: str) -> bool:
+    async def _send_session_dm(
+        self, session: dict, notification: tuple[str, list[str]]
+    ) -> bool:
         player_ids = await database.get_players(session["id"])
         if not player_ids:
             return False
@@ -997,7 +1144,7 @@ class Session(commands.GroupCog, name="session"):
         for user_id in player_ids:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                await user.send(content=content)
+                await user.send(view=build_session_dm_view(*notification))
             except discord.Forbidden:
                 logger.warning("Cannot DM user %s for session %s", user_id, session["id"])
             except discord.HTTPException:
@@ -1017,6 +1164,7 @@ class Session(commands.GroupCog, name="session"):
             session["start_dm_sent"] = 1
 
     async def _fire_session(self, session: dict) -> None:
+        await self._create_session_thread(session)
         if not session.get("start_dm_sent"):
             await self._send_start_dm(session)
         await database.set_session_status(session["id"], "fired")
@@ -1032,6 +1180,8 @@ class Session(commands.GroupCog, name="session"):
 
                 if not session.get("reminder_sent") and seconds_until_start <= timedelta(minutes=30).total_seconds():
                     await self._send_reminder_dm(session)
+                if seconds_until_start <= timedelta(minutes=10).total_seconds():
+                    await self._create_session_thread(session)
                 if not session.get("start_dm_sent") and seconds_until_start <= timedelta(minutes=5).total_seconds():
                     await self._send_start_dm(session)
                 if seconds_until_start <= 0:
