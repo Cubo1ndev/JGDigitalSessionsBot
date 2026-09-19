@@ -3,7 +3,7 @@ from io import BytesIO
 from pathlib import Path
 
 import discord
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from discord import app_commands
 from discord.app_commands import Range
 from discord.ext import commands, tasks
@@ -29,6 +29,7 @@ NO_MENTIONS = discord.AllowedMentions(
     everyone=False, users=False, roles=False, replied_user=False
 )
 logger = logging.getLogger(__name__)
+BANNER_BACKDROP_PATH = Path(__file__).resolve().parent.parent / "assets" / "session-backdrop.png"
 
 STATUS_LABELS = {
     "fired": "Started — check your DMs!",
@@ -123,41 +124,58 @@ def _fit_banner_font(
 
 def build_session_banner(session: dict) -> discord.File:
     width, height = 1200, 360
-    image = Image.new("RGB", (width, height), (17, 20, 28))
+    if BANNER_BACKDROP_PATH.exists():
+        image = ImageOps.fit(
+            Image.open(BANNER_BACKDROP_PATH).convert("RGB"),
+            (width, height),
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.46),
+        ).convert("RGBA")
+        image = Image.alpha_composite(
+            image,
+            Image.new("RGBA", (width, height), (7, 11, 20, 132)),
+        )
+    else:
+        image = Image.new("RGBA", (width, height), (17, 20, 28, 255))
     draw = ImageDraw.Draw(image)
 
-    for x in range(width):
-        blend = x / width
-        color = (
-            int(17 + 24 * blend),
-            int(20 + 4 * blend),
-            int(28 + 11 * blend),
-        )
-        draw.line((x, 0, x, height), fill=color)
+    if not BANNER_BACKDROP_PATH.exists():
+        for x in range(width):
+            blend = x / width
+            color = (
+                int(17 + 24 * blend),
+                int(20 + 4 * blend),
+                int(28 + 11 * blend),
+                255,
+            )
+            draw.line((x, 0, x, height), fill=color)
 
     for offset in range(-height, width, 90):
-        draw.line((offset, height, offset + height, 0), fill=(31, 34, 45), width=2)
+        draw.line((offset, height, offset + height, 0), fill=(31, 34, 45, 70), width=2)
 
-    draw.ellipse((width // 2 - 280, -210, width // 2 + 280, 350), fill=(35, 31, 43))
-    draw.ellipse((width // 2 - 190, -120, width // 2 + 190, 260), fill=(39, 34, 45))
     draw.rounded_rectangle(
         (28, 28, width - 28, height - 28),
         radius=22,
-        fill=(20, 22, 30),
-        outline=(78, 82, 96),
+        fill=(12, 16, 25, 72),
+        outline=(172, 186, 210, 190),
         width=2,
     )
-    draw.rounded_rectangle(
-        (width // 2 - 260, 54, width // 2 + 260, height - 54),
-        radius=18,
-        outline=(52, 56, 70),
-        width=2,
-    )
-
     title = session.get("company_name") or "Session"
     host_name = session.get("host_name") or "Unknown host"
     title_font = _fit_banner_font(title, 104, 940, bold=True)
     host_font = _fit_banner_font(f"Hosted by {host_name[:48]}", 42, 820)
+    title_box = draw.textbbox((0, 0), title, font=title_font)
+    host_box = draw.textbbox((0, 0), f"Hosted by {host_name[:48]}", font=host_font)
+    title_width = title_box[2] - title_box[0]
+    host_width = host_box[2] - host_box[0]
+    panel_width = min(1080, max(520, title_width + 120, host_width + 160))
+    draw.rounded_rectangle(
+        (width // 2 - panel_width // 2, 54, width // 2 + panel_width // 2, height - 54),
+        radius=18,
+        fill=(10, 14, 23, 125),
+        outline=(177, 194, 220, 150),
+        width=2,
+    )
 
     def centered_text(
         text: str,
@@ -167,26 +185,24 @@ def build_session_banner(session: dict) -> discord.File:
     ) -> None:
         draw.text((width // 2, y), text, font=font, fill=fill, anchor="mm")
 
-    title_box = draw.textbbox((0, 0), title, font=title_font)
-    title_width = title_box[2] - title_box[0]
     draw.text(
         (width // 2 + 3, 135 + 4),
         title,
         font=title_font,
-        fill=(8, 10, 15),
+        fill=(4, 7, 12, 230),
         anchor="mm",
     )
-    centered_text(title, 135, title_font, (248, 249, 250))
+    centered_text(title, 135, title_font, (255, 255, 255))
     draw.rounded_rectangle(
         (width // 2 - min(title_width // 2, 250), 190,
          width // 2 + min(title_width // 2, 250), 194),
         radius=2,
-        fill=(111, 180, 255),
+        fill=(132, 196, 255, 230),
     )
-    centered_text(f"Hosted by {host_name[:48]}", 232, host_font, (190, 198, 214))
+    centered_text(f"Hosted by {host_name[:48]}", 232, host_font, (224, 231, 242))
 
     buffer = BytesIO()
-    image.save(buffer, format="PNG", optimize=True)
+    image.convert("RGB").save(buffer, format="PNG", optimize=True)
     buffer.seek(0)
     return discord.File(buffer, filename="session_banner.png")
 
