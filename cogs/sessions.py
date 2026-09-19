@@ -52,7 +52,7 @@ def build_session_sections(
     player_count = len(player_ids)
     max_players = session["max_players"]
 
-    header = f"# {session['company_name']}\nHosted by {session.get('host_name') or 'Unknown host'}"
+    header = f"# {session['company_name']}"
     description = session.get("description") or "No description provided."
 
     if status == "pending":
@@ -133,23 +133,20 @@ def build_session_banner(session: dict) -> discord.File:
         draw.line((x, 0, x, height), fill=color)
 
     draw.rounded_rectangle((28, 28, width - 28, height - 28), radius=18, outline=(70, 74, 84), width=2)
-    draw.rounded_rectangle((width // 2 - 110, 42, width // 2 + 110, 48), radius=3, fill=(236, 126, 24))
     draw.ellipse((width - 230, -80, width + 80, 230), fill=(46, 48, 58))
     draw.ellipse((width - 160, 90, width + 100, 350), fill=(34, 36, 44))
 
     title = session.get("company_name") or "Session"
     host_name = session.get("host_name") or "Unknown host"
-    label_font = _banner_font(22, bold=True)
-    title_font = _fit_banner_font(title, 82, 980, bold=True)
-    host_font = _fit_banner_font(f"Hosted by {host_name[:48]}", 38, 900)
+    title_font = _fit_banner_font(title, 112, 980, bold=True)
+    host_font = _fit_banner_font(f"Hosted by {host_name[:48]}", 48, 900)
 
     def centered_text(text: str, y: int, font: ImageFont.ImageFont, fill: tuple[int, int, int]) -> None:
         bounds = draw.textbbox((0, 0), text, font=font)
         draw.text(((width - (bounds[2] - bounds[0])) / 2, y), text, font=font, fill=fill)
 
-    centered_text("SESSION", 78, label_font, (236, 126, 24))
-    centered_text(title, 112, title_font, (248, 249, 250))
-    centered_text(f"Hosted by {host_name[:48]}", 220, host_font, (214, 217, 224))
+    centered_text(title, 78, title_font, (248, 249, 250))
+    centered_text(f"Hosted by {host_name[:48]}", 208, host_font, (214, 217, 224))
 
     buffer = BytesIO()
     image.save(buffer, format="PNG", optimize=True)
@@ -325,7 +322,7 @@ class SessionView(discord.ui.LayoutView):
             media="attachment://session_banner.png",
             description="Session banner",
         )
-        self.header = discord.ui.TextDisplay(f"# Session {session_id}\nHosted by Unknown host")
+        self.header = discord.ui.TextDisplay(f"# Session {session_id}")
         self.description = discord.ui.TextDisplay("No description provided.")
         self.schedule = discord.ui.TextDisplay("Starts\nNot scheduled")
         self.players = discord.ui.TextDisplay("Players (0/0)\nNo players joined yet.")
@@ -345,12 +342,18 @@ class SessionView(discord.ui.LayoutView):
                 label="Host Settings", style=discord.ButtonStyle.grey,
                 custom_id=f"session_settings:{session_id}",
             )
+            self.copy_id_button = discord.ui.Button(
+                label="Copy Session ID", style=discord.ButtonStyle.grey,
+                custom_id=f"session_copy_id:{session_id}",
+            )
             self.join_button.callback = self._join_button
             self.leave_button.callback = self._leave_button
             self.settings_button.callback = self._settings_button
+            self.copy_id_button.callback = self._copy_id_button
             self.controls.add_item(self.join_button)
             self.controls.add_item(self.leave_button)
             self.controls.add_item(self.settings_button)
+            self.controls.add_item(self.copy_id_button)
             children.extend([
                 discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
                 self.controls,
@@ -363,6 +366,12 @@ class SessionView(discord.ui.LayoutView):
         self.description.content = description
         self.schedule.content = schedule
         self.players.content = players
+
+    async def _copy_id_button(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            f"Session ID: `{self.session_id}`\nCopy the ID from this private message.",
+            ephemeral=True,
+        )
 
     async def _join_button(self, interaction: discord.Interaction) -> None:
         session = await database.get_session(self.session_id)
