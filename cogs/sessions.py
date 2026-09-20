@@ -133,7 +133,7 @@ def get_banner_paths() -> list[Path]:
 
 
 def build_session_banner(session: dict) -> discord.File:
-    width, height = 1200, 280
+    width, height = 1200, 220
     backdrop_paths = get_banner_paths()
     backdrop_path = backdrop_paths[(session.get("banner_index") or 0) % len(backdrop_paths)] if backdrop_paths else None
     if backdrop_path is not None:
@@ -176,14 +176,14 @@ def build_session_banner(session: dict) -> discord.File:
         draw.text((width // 2, y), text, font=font, fill=fill, anchor="mm")
 
     draw.text(
-        (width // 2 + 3, 104 + 3),
+        (width // 2 + 3, 82 + 3),
         title,
         font=title_font,
         fill=(4, 7, 12, 230),
         anchor="mm",
     )
-    centered_text(title, 104, title_font, (255, 255, 255))
-    centered_text(f"Hosted by {host_name[:48]}", 171, host_font, (224, 231, 242))
+    centered_text(title, 82, title_font, (255, 255, 255))
+    centered_text(f"Hosted by {host_name[:48]}", 153, host_font, (224, 231, 242))
 
     buffer = BytesIO()
     image.convert("RGB").save(buffer, format="PNG", optimize=True)
