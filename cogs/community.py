@@ -72,6 +72,15 @@ def build_faq_view() -> discord.ui.LayoutView:
     return _info_view(content.FAQ_TITLE, content.FAQ_INTRO, content.FAQ)
 
 
+def build_support_view(label: str, email: str) -> discord.ui.LayoutView:
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(discord.ui.Container(
+        discord.ui.TextDisplay(f"## {label}\nSend us an email at:"),
+        discord.ui.TextDisplay(f"```{email}```"),
+    ))
+    return view
+
+
 class CommunityView(discord.ui.LayoutView):
     def __init__(
         self,
@@ -104,6 +113,15 @@ class CommunityView(discord.ui.LayoutView):
         self.faq_button.callback = self._faq
         rules_row = discord.ui.ActionRow(self.rules_button, self.faq_button)
 
+        self.support_select = discord.ui.Select(
+            custom_id="community:support",
+            placeholder=content.SUPPORT_PLACEHOLDER,
+            options=[
+                discord.SelectOption(label=label, value=str(index), description=description)
+                for index, (label, description, _) in enumerate(content.SUPPORT_CONTACTS)
+            ],
+        )
+        self.support_select.callback = self._support
         for item in (
             _banner(welcome_banner, "Welcome to JustGames Digital"),
             discord.ui.Container(*welcome_children),
@@ -119,9 +137,7 @@ class CommunityView(discord.ui.LayoutView):
             discord.ui.Container(
                 discord.ui.TextDisplay(content.SUPPORT_PANEL_TEXT),
                 discord.ui.Separator(),
-                discord.ui.TextDisplay(
-                    "\n".join(f"**{label}** — {email}" for label, email in content.SUPPORT_CONTACTS)
-                ),
+                discord.ui.ActionRow(self.support_select),
             ),
         ):
             if item is not None:
@@ -135,6 +151,19 @@ class CommunityView(discord.ui.LayoutView):
     async def _faq(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
             view=build_faq_view(), ephemeral=True, allowed_mentions=NO_MENTIONS
+        )
+
+
+    async def _support(self, interaction: discord.Interaction) -> None:
+        try:
+            label, _, email = content.SUPPORT_CONTACTS[int(self.support_select.values[0])]
+        except (ValueError, IndexError):
+            await interaction.response.send_message(
+                "That option is no longer available.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            view=build_support_view(label, email), ephemeral=True, allowed_mentions=NO_MENTIONS
         )
 
 

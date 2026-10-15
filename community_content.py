@@ -20,13 +20,14 @@ RULES_PANEL_TEXT = (
 
 SUPPORT_PANEL_TEXT = (
     "Need a hand, have feedback, or want to work with us? "
-    "Reach the right team by email:"
+    "Pick a topic below and we'll privately show you the right email."
 )
-# (label, email) pairs shown in the support panel.
+SUPPORT_PLACEHOLDER = "Choose how we can help..."
+# (label, description, email) shown as dropdown options. Max 25 entries.
 SUPPORT_CONTACTS = [
-    ("Support", "support@justgamesdigital.com"),
-    ("Feedback", "feedback@justgamesdigital.com"),
-    ("Business", "business@justgamesdigital.com"),
+    ("Support Inquiries", "Help with our games or community", "support@justgamesdigital.com"),
+    ("Feedback", "Share ideas and suggestions", "feedback@justgamesdigital.com"),
+    ("Business Inquiries", "Partnerships and business", "business@justgamesdigital.com"),
 ]
 
 WEBSITE_URL = "https://justgamesdigital.com/"

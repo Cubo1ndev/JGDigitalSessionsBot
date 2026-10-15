@@ -2,6 +2,7 @@ import asyncio
 
 import discord
 
+import community_content as content
 from cogs.community import CommunityView, build_faq_view, build_rules_view, find_banner
 
 
@@ -35,13 +36,27 @@ def test_banners_sit_outside_containers():
     )
 
 
-def test_support_panel_lists_every_email():
+def test_support_dropdown_replies_privately_with_the_email():
+    sent = []
+
+    class Response:
+        async def send_message(self, *args, **kwargs):
+            sent.append(kwargs)
+
+    class Interaction:
+        response = Response()
+
     view = CommunityView()
-    text = " ".join(
-        item.content for item in view.walk_children() if isinstance(item, discord.ui.TextDisplay)
-    )
-    for email in ("support@", "feedback@", "business@"):
+    assert len(view.support_select.options) == len(content.SUPPORT_CONTACTS)
+    for index, (_, _, email) in enumerate(content.SUPPORT_CONTACTS):
+        view.support_select._values = [str(index)]
+        asyncio.run(view.support_select.callback(Interaction()))
+        text = " ".join(
+            item.content for item in sent[-1]["view"].walk_children()
+            if isinstance(item, discord.ui.TextDisplay)
+        )
         assert email in text
+        assert sent[-1]["ephemeral"] is True
 
 
 def test_rules_and_faq_buttons_reply_privately_with_components():
