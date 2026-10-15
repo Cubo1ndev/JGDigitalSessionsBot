@@ -73,7 +73,12 @@ def build_faq_view() -> discord.ui.LayoutView:
 
 
 class CommunityView(discord.ui.LayoutView):
-    def __init__(self, welcome_banner: str | None = None, rules_banner: str | None = None) -> None:
+    def __init__(
+        self,
+        welcome_banner: str | None = None,
+        rules_banner: str | None = None,
+        support_banner: str | None = None,
+    ) -> None:
         super().__init__(timeout=None)
 
         welcome_children: list[discord.ui.Item] = [
@@ -108,6 +113,15 @@ class CommunityView(discord.ui.LayoutView):
                 discord.ui.TextDisplay(content.RULES_PANEL_TEXT),
                 discord.ui.Separator(),
                 rules_row,
+            ),
+            discord.ui.Separator(visible=False, spacing=discord.SeparatorSpacing.large),
+            _banner(support_banner, "Support"),
+            discord.ui.Container(
+                discord.ui.TextDisplay(content.SUPPORT_PANEL_TEXT),
+                discord.ui.Separator(),
+                discord.ui.TextDisplay(
+                    "\n".join(f"**{label}** — {email}" for label, email in content.SUPPORT_CONTACTS)
+                ),
             ),
         ):
             if item is not None:
@@ -149,7 +163,11 @@ class Community(commands.GroupCog, name="community"):
 
         await interaction.response.defer(ephemeral=True)
         files: list[discord.File] = []
-        names: dict[str, str | None] = {"welcome_banner": None, "rules_banner": None}
+        names: dict[str, str | None] = {
+            "welcome_banner": None,
+            "rules_banner": None,
+            "support_banner": None,
+        }
         for stem in names:
             path = find_banner(stem)
             if path is not None:
@@ -158,7 +176,7 @@ class Community(commands.GroupCog, name="community"):
 
         try:
             await channel.send(
-                view=CommunityView(names["welcome_banner"], names["rules_banner"]),
+                view=CommunityView(**names),
                 files=files,
                 allowed_mentions=NO_MENTIONS,
             )

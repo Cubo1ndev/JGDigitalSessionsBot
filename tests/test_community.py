@@ -22,12 +22,26 @@ def test_find_banner_returns_none_when_missing(tmp_path):
 
 
 def test_banners_sit_outside_containers():
-    view = CommunityView("welcome_banner.png", "rules_banner.png")
+    view = CommunityView("welcome_banner.png", "rules_banner.png", "support_banner.png")
     kinds = [type(child) for child in view.children]
+    assert kinds.count(discord.ui.MediaGallery) == 3
+    assert kinds.count(discord.ui.Container) == 3
     assert kinds[0] is discord.ui.MediaGallery
-    assert kinds[1] is discord.ui.Container
-    assert discord.ui.MediaGallery in kinds[2:]
     assert kinds[-1] is discord.ui.Container
+    assert all(
+        not isinstance(child, discord.ui.MediaGallery)
+        for container in view.children if isinstance(container, discord.ui.Container)
+        for child in container.children
+    )
+
+
+def test_support_panel_lists_every_email():
+    view = CommunityView()
+    text = " ".join(
+        item.content for item in view.walk_children() if isinstance(item, discord.ui.TextDisplay)
+    )
+    for email in ("support@", "feedback@", "business@"):
+        assert email in text
 
 
 def test_rules_and_faq_buttons_reply_privately_with_components():

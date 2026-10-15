@@ -18,6 +18,17 @@ RULES_PANEL_TEXT = (
     "the community — channel guides, roles, FAQs, and more."
 )
 
+SUPPORT_PANEL_TEXT = (
+    "Need a hand, have feedback, or want to work with us? "
+    "Reach the right team by email:"
+)
+# (label, email) pairs shown in the support panel.
+SUPPORT_CONTACTS = [
+    ("Support", "support@justgamesdigital.com"),
+    ("Feedback", "feedback@justgamesdigital.com"),
+    ("Business", "business@justgamesdigital.com"),
+]
+
 WEBSITE_URL = "https://justgamesdigital.com/"
 ROBLOX_GROUP_URL = "https://www.roblox.com/communities/4866418/JustGames-Digital#!/about"
 YOUTUBE_URL = "https://www.youtube.com/@JustGamesDigital"
@@ -82,7 +93,7 @@ RULES_NOTES = (
     "can be opened in the support channel."
 )
 
-FAQ_TITLE = "❓ Frequently Asked Questions"
+FAQ_TITLE = "Frequently Asked Questions"
 FAQ_INTRO = "Quick answers to the things we get asked most."
 # (question, answer) pairs.
 FAQ = [
