@@ -25,7 +25,13 @@ The SQLite database is created at `DB_PATH` on first startup.
 
 ## Community Welcome
 
-In the channel where the welcome should appear, run `/community welcome`. Server members with **Manage Server** permission can provide up to two banner images and links for the website, ROBLOX group, YouTube, X, rules, FAQ, and suggestions. The bot posts the welcome and rules panels; omitted links simply do not show a button. The images and links are posted to Discord and are not saved in the bot database.
+In the channel where the welcome should appear, run `/community welcome` (requires **Manage Server**). The bot posts a public welcome and rules panel with the banners shown above each panel.
+
+Everything is configured in code, not in the command:
+
+- Banners: put `welcome_banner.png` and `rules_banner.png` (png/jpg/jpeg/webp/gif) in `assets/community/`. Missing banners are skipped.
+- Links, welcome text, rules, and FAQ: edit `community_content.py`. Empty URLs hide their button.
+- The **Rules** and **FAQ** buttons reply privately to whoever clicks them, in the same channel.
 
 ## Discord Permissions
 
@@ -40,7 +46,9 @@ The bot needs permission to:
 
 ```text
 bot.py                 Application startup and cog loading
-cogs/community.py       Community welcome and rules panels
+cogs/community.py      Community welcome and rules panels
+community_content.py   Welcome/rules/FAQ text, links (edit this)
+assets/community/      Welcome and rules banner images
 cogs/sessions.py       Session commands, views, notifications, and scheduler
 database.py            SQLite persistence
 session_logic.py       Pure validation and date helpers

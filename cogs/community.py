@@ -1,218 +1,153 @@
 import logging
-from urllib.parse import urlsplit
+from pathlib import Path
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+import community_content as content
+
 logger = logging.getLogger(__name__)
-IMAGE_EXTENSIONS = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-}
 
-WELCOME_COPY = (
-    "We're glad you're here! This is the central hub for our community — find our "
-    "links, updates, support, and everything else you need, all in one place.\n\n"
-    "Grab a role, explore the channels, and don't be a stranger 👋"
-)
-RULES_COPY = (
-    "Get to know the server rules and other important info you'll need to navigate "
-    "the community — channel guides, roles, FAQs, and more."
-)
+BANNER_DIR = Path(__file__).resolve().parent.parent / "assets" / "community"
+BANNER_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+NO_MENTIONS = discord.AllowedMentions.none()
 
 
-def validate_link(url: str | None) -> str | None:
-    if url is None:
+def find_banner(stem: str, directory: Path = BANNER_DIR) -> Path | None:
+    for extension in BANNER_EXTENSIONS:
+        path = directory / f"{stem}{extension}"
+        if path.is_file():
+            return path
+    return None
+
+
+def _banner(filename: str | None, description: str) -> discord.ui.MediaGallery | None:
+    if filename is None:
         return None
-    parsed = urlsplit(url)
-    if (
-        len(url) > 512
-        or parsed.scheme not in {"http", "https"}
-        or not parsed.hostname
-    ):
-        raise ValueError("Links must be valid HTTP or HTTPS URLs.")
-    return url
+    gallery = discord.ui.MediaGallery()
+    gallery.add_item(media=f"attachment://{filename}", description=description)
+    return gallery
 
 
-def _image_extension(attachment: discord.Attachment) -> str | None:
-    if attachment.content_type is None:
-        return None
-    return IMAGE_EXTENSIONS.get(attachment.content_type.lower())
-
-
-def _link_row(links: list[tuple[str, str | None]]) -> discord.ui.ActionRow | None:
-    buttons = [
+def _link_buttons(links: list[tuple[str, str]]) -> list[discord.ui.Button]:
+    return [
         discord.ui.Button(label=label, style=discord.ButtonStyle.link, url=url)
         for label, url in links
-        if url is not None
+        if url
     ]
-    if not buttons:
-        return None
-    row = discord.ui.ActionRow()
-    for button in buttons:
-        row.add_item(button)
-    return row
 
 
-def build_community_view(
-    welcome_banner: str | None,
-    rules_banner: str | None,
-    website_url: str | None,
-    roblox_group_url: str | None,
-    youtube_url: str | None,
-    x_url: str | None,
-    rules_url: str | None,
-    faq_url: str | None,
-    suggestions_url: str | None,
-) -> discord.ui.LayoutView:
-    welcome_items: list[discord.ui.Item] = []
-    if welcome_banner:
-        gallery = discord.ui.MediaGallery()
-        gallery.add_item(media=welcome_banner, description="Welcome to JustGames Digital")
-        welcome_items.append(gallery)
-    welcome_items.append(discord.ui.TextDisplay(f"## Welcome to JustGames Digital\n{WELCOME_COPY}"))
-    welcome_row = _link_row([
-        ("Website", website_url),
-        ("ROBLOX Group", roblox_group_url),
-        ("YouTube", youtube_url),
-        ("X", x_url),
-    ])
-    if welcome_row:
-        welcome_items.extend([
-            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
-            welcome_row,
+class CommunityView(discord.ui.LayoutView):
+    def __init__(self, welcome_banner: str | None = None, rules_banner: str | None = None) -> None:
+        super().__init__(timeout=None)
+
+        welcome_children: list[discord.ui.Item] = [
+            discord.ui.TextDisplay(f"## {content.WELCOME_TITLE}\n{content.WELCOME_TEXT}")
+        ]
+        welcome_buttons = _link_buttons([
+            ("Website", content.WEBSITE_URL),
+            ("ROBLOX Group", content.ROBLOX_GROUP_URL),
+            ("YouTube", content.YOUTUBE_URL),
+            ("X", content.X_URL),
         ])
+        if welcome_buttons:
+            row = discord.ui.ActionRow(*welcome_buttons)
+            welcome_children.extend([discord.ui.Separator(), row])
 
-    rules_items: list[discord.ui.Item] = []
-    if rules_banner:
-        gallery = discord.ui.MediaGallery()
-        gallery.add_item(media=rules_banner, description="Community rules")
-        rules_items.append(gallery)
-    rules_items.append(discord.ui.TextDisplay(RULES_COPY))
-    rules_row = _link_row([
-        ("Rules", rules_url),
-        ("FAQ", faq_url),
-        ("Suggestions", suggestions_url),
-    ])
-    if rules_row:
-        rules_items.append(rules_row)
+        self.rules_button = discord.ui.Button(
+            label="Rules", style=discord.ButtonStyle.secondary, custom_id="community:rules"
+        )
+        self.faq_button = discord.ui.Button(
+            label="FAQ", style=discord.ButtonStyle.secondary, custom_id="community:faq"
+        )
+        self.rules_button.callback = self._rules
+        self.faq_button.callback = self._faq
+        rules_row = discord.ui.ActionRow(self.rules_button, self.faq_button)
+        for button in _link_buttons([("Suggestions", content.SUGGESTIONS_URL)]):
+            rules_row.add_item(button)
 
-    view = discord.ui.LayoutView(timeout=None)
-    view.add_item(discord.ui.Container(*welcome_items))
-    view.add_item(discord.ui.Container(*rules_items))
-    return view
+        for item in (
+            _banner(welcome_banner, "Welcome to JustGames Digital"),
+            discord.ui.Container(*welcome_children),
+            discord.ui.Separator(visible=False, spacing=discord.SeparatorSpacing.large),
+            _banner(rules_banner, "Rules"),
+            discord.ui.Container(discord.ui.TextDisplay(content.RULES_PANEL_TEXT), rules_row),
+        ):
+            if item is not None:
+                self.add_item(item)
+
+    async def _rules(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            content.RULES_TEXT, ephemeral=True, allowed_mentions=NO_MENTIONS
+        )
+
+    async def _faq(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            content.FAQ_TEXT, ephemeral=True, allowed_mentions=NO_MENTIONS
+        )
 
 
 class Community(commands.GroupCog, name="community"):
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
+
+    async def cog_load(self) -> None:
+        # Keeps the Rules/FAQ buttons working on already-posted messages after restarts.
+        self.bot.add_view(CommunityView())
+
     @app_commands.command(
         name="welcome",
-        description="Post the JustGames Digital welcome and community links",
+        description="Post the public JustGames Digital welcome and rules panel here",
     )
-    @app_commands.describe(
-        welcome_banner="Optional image for the welcome panel",
-        rules_banner="Optional image for the rules panel",
-        website_url="Website link",
-        roblox_group_url="ROBLOX group link",
-        youtube_url="YouTube channel link",
-        x_url="X profile link",
-        rules_url="Rules channel or page link",
-        faq_url="FAQ channel or page link",
-        suggestions_url="Suggestions channel or page link",
-    )
-    async def welcome(
-        self,
-        interaction: discord.Interaction,
-        welcome_banner: discord.Attachment | None = None,
-        rules_banner: discord.Attachment | None = None,
-        website_url: str | None = None,
-        roblox_group_url: str | None = None,
-        youtube_url: str | None = None,
-        x_url: str | None = None,
-        rules_url: str | None = None,
-        faq_url: str | None = None,
-        suggestions_url: str | None = None,
-    ) -> None:
-        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def welcome(self, interaction: discord.Interaction) -> None:
+        channel = interaction.channel
+        if not isinstance(channel, discord.abc.Messageable):
             await interaction.response.send_message(
-                "This command can only be used in a server.", ephemeral=True
-            )
-            return
-        if not interaction.user.guild_permissions.manage_guild:
-            await interaction.response.send_message(
-                "You need the Manage Server permission to post the community welcome.",
-                ephemeral=True,
+                "I can't post in this channel.", ephemeral=True
             )
             return
 
-        try:
-            links = [
-                validate_link(url)
-                for url in (
-                    website_url,
-                    roblox_group_url,
-                    youtube_url,
-                    x_url,
-                    rules_url,
-                    faq_url,
-                    suggestions_url,
-                )
-            ]
-        except ValueError as error:
-            await interaction.response.send_message(str(error), ephemeral=True)
-            return
-
-        banner_uploads: list[tuple[int, discord.Attachment, str]] = []
-        for index, attachment in enumerate((welcome_banner, rules_banner)):
-            if attachment is None:
-                continue
-            extension = _image_extension(attachment)
-            if extension is None:
-                await interaction.response.send_message(
-                    f"`{attachment.filename}` must be a PNG, JPEG, WebP, or GIF image.",
-                    ephemeral=True,
-                )
-                return
-            prefix = "welcome_banner" if index == 0 else "rules_banner"
-            banner_uploads.append((index, attachment, f"{prefix}{extension}"))
-
-        if not banner_uploads and not any(links):
-            await interaction.response.send_message(
-                "Add at least one link or banner image before posting the welcome.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(ephemeral=True)
         files: list[discord.File] = []
-        banner_urls: list[str | None] = [None, None]
-        try:
-            for index, attachment, filename in banner_uploads:
-                files.append(await attachment.to_file(filename=filename))
-                banner_urls[index] = f"attachment://{filename}"
+        names: dict[str, str | None] = {"welcome_banner": None, "rules_banner": None}
+        for stem in names:
+            path = find_banner(stem)
+            if path is not None:
+                files.append(discord.File(path, filename=path.name))
+                names[stem] = path.name
 
-            view = build_community_view(*banner_urls, *links)
-            await interaction.followup.send(
-                view=view,
+        try:
+            await channel.send(
+                view=CommunityView(names["welcome_banner"], names["rules_banner"]),
                 files=files,
-                allowed_mentions=discord.AllowedMentions.none(),
-                ephemeral=False,
+                allowed_mentions=NO_MENTIONS,
             )
         except discord.HTTPException:
             logger.exception("Failed to post the community welcome")
             await interaction.followup.send(
-                "Discord couldn't post the community welcome. Please check the "
-                "images and try again.",
+                "I couldn't post the welcome here. Check that I can send messages and "
+                "attach files in this channel.",
                 ephemeral=True,
             )
             return
 
-        await interaction.followup.send(
-            "Posted the JustGames Digital community welcome.", ephemeral=True
-        )
+        await interaction.followup.send("Posted the community welcome.", ephemeral=True)
+
+    @welcome.error
+    async def welcome_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "You need the Manage Server permission to use this command.", ephemeral=True
+            )
+        else:
+            raise error
 
 
 async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(Community())
+    await bot.add_cog(Community(bot))
