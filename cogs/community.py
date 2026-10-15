@@ -38,12 +38,46 @@ def _link_buttons(links: list[tuple[str, str]]) -> list[discord.ui.Button]:
     ]
 
 
+def _info_view(
+    title: str,
+    intro: str,
+    entries: list[tuple[str, str]],
+    footer: str | None = None,
+    numbered: bool = False,
+) -> discord.ui.LayoutView:
+    children: list[discord.ui.Item] = [
+        discord.ui.TextDisplay(f"# {title}\n{intro}"),
+        discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+    ]
+    for index, (heading, body) in enumerate(entries, start=1):
+        label = f"{index}. {heading}" if numbered else heading
+        children.append(discord.ui.TextDisplay(f"### {label}\n{body}"))
+    if footer:
+        children.extend([
+            discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+            discord.ui.TextDisplay(footer),
+        ])
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(discord.ui.Container(*children, accent_colour=discord.Colour.orange()))
+    return view
+
+
+def build_rules_view() -> discord.ui.LayoutView:
+    return _info_view(
+        content.RULES_TITLE, content.RULES_INTRO, content.RULES, content.RULES_NOTES, numbered=True
+    )
+
+
+def build_faq_view() -> discord.ui.LayoutView:
+    return _info_view(content.FAQ_TITLE, content.FAQ_INTRO, content.FAQ)
+
+
 class CommunityView(discord.ui.LayoutView):
     def __init__(self, welcome_banner: str | None = None, rules_banner: str | None = None) -> None:
         super().__init__(timeout=None)
 
         welcome_children: list[discord.ui.Item] = [
-            discord.ui.TextDisplay(f"## {content.WELCOME_TITLE}\n{content.WELCOME_TEXT}")
+            discord.ui.TextDisplay(f"# **{content.WELCOME_TITLE}**\n{content.WELCOME_TEXT}")
         ]
         welcome_buttons = _link_buttons([
             ("Website", content.WEBSITE_URL),
@@ -79,12 +113,12 @@ class CommunityView(discord.ui.LayoutView):
 
     async def _rules(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
-            content.RULES_TEXT, ephemeral=True, allowed_mentions=NO_MENTIONS
+            view=build_rules_view(), ephemeral=True, allowed_mentions=NO_MENTIONS
         )
 
     async def _faq(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
-            content.FAQ_TEXT, ephemeral=True, allowed_mentions=NO_MENTIONS
+            view=build_faq_view(), ephemeral=True, allowed_mentions=NO_MENTIONS
         )
 
 

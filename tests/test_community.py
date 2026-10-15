@@ -2,13 +2,17 @@ import asyncio
 
 import discord
 
-import community_content as content
-from cogs.community import CommunityView, find_banner
+from cogs.community import CommunityView, build_faq_view, build_rules_view, find_banner
 
 
-def test_rules_and_faq_fit_in_a_message():
-    assert len(content.RULES_TEXT) <= 2000
-    assert len(content.FAQ_TEXT) <= 2000
+def _text_length(view: discord.ui.LayoutView) -> int:
+    return sum(len(item.content) for item in view.walk_children() if isinstance(item, discord.ui.TextDisplay))
+
+
+def test_rules_and_faq_fit_discord_limits():
+    assert _text_length(build_rules_view()) <= 4000
+    assert _text_length(build_faq_view()) <= 4000
+    assert len(build_rules_view().to_components()[0]["components"]) <= 40
 
 
 def test_find_banner_returns_none_when_missing(tmp_path):
@@ -26,12 +30,12 @@ def test_banners_sit_outside_containers():
     assert kinds[-1] is discord.ui.Container
 
 
-def test_rules_and_faq_buttons_reply_privately():
+def test_rules_and_faq_buttons_reply_privately_with_components():
     sent = []
 
     class Response:
-        async def send_message(self, text, **kwargs):
-            sent.append((text, kwargs))
+        async def send_message(self, *args, **kwargs):
+            sent.append((args, kwargs))
 
     class Interaction:
         response = Response()
@@ -40,5 +44,9 @@ def test_rules_and_faq_buttons_reply_privately():
     asyncio.run(view.rules_button.callback(Interaction()))
     asyncio.run(view.faq_button.callback(Interaction()))
 
-    assert [text for text, _ in sent] == [content.RULES_TEXT, content.FAQ_TEXT]
-    assert all(kwargs["ephemeral"] is True for _, kwargs in sent)
+    assert len(sent) == 2
+    for args, kwargs in sent:
+        assert args == ()
+        assert kwargs["ephemeral"] is True
+        assert isinstance(kwargs["view"], discord.ui.LayoutView)
+        assert kwargs["view"].children[0].type == discord.ComponentType.container
