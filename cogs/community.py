@@ -58,7 +58,7 @@ def _info_view(
             discord.ui.TextDisplay(footer),
         ])
     view = discord.ui.LayoutView(timeout=None)
-    view.add_item(discord.ui.Container(*children, accent_colour=discord.Colour.orange()))
+    view.add_item(discord.ui.Container(*children))
     return view
 
 
@@ -77,7 +77,7 @@ class CommunityView(discord.ui.LayoutView):
         super().__init__(timeout=None)
 
         welcome_children: list[discord.ui.Item] = [
-            discord.ui.TextDisplay(f"# **{content.WELCOME_TITLE}**\n{content.WELCOME_TEXT}")
+            discord.ui.TextDisplay(f"## {content.WELCOME_TITLE}\n{content.WELCOME_TEXT}")
         ]
         welcome_buttons = _link_buttons([
             ("Website", content.WEBSITE_URL),
