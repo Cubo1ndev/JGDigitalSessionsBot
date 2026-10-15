@@ -6,13 +6,13 @@
 
 **Legal contact:** support@justgamesdigital.com
 
-These Terms of Service ("Terms") govern your use of the JustGames Digital Sessions Discord bot (the "Bot"), operated by JustGames Digital ("we," "us," or "our"). By using the Bot, you agree to these Terms. If you do not agree, do not use the Bot.
+These Terms of Service ("Terms") govern your use of the JustGames Digital Discord bot (the "Bot"), operated by JustGames Digital ("we," "us," or "our"). By using the Bot, you agree to these Terms. If you do not agree, do not use the Bot.
 
 > **Before publishing:** Publish this document at a stable public HTTPS URL and enter that URL as the Terms of Service link in the Discord Developer Portal.
 
 ## 1. The Service
 
-The Bot helps Discord communities schedule and manage multiplayer sessions. Features may include creating sessions, joining or leaving sessions, player limits, host controls, reminders, direct-message instructions, and session status updates.
+The Bot helps Discord communities share community information and schedule multiplayer sessions. Features may include posting welcome and rules panels, creating sessions, joining or leaving sessions, player limits, host controls, reminders, direct-message instructions, and session status updates.
 
 The Bot depends on Discord and may be unavailable, delayed, or limited because of Discord outages, API changes, hosting failures, maintenance, rate limits, or circumstances outside our control.
 
@@ -41,9 +41,9 @@ A session is an organizational tool, not a guarantee that a game server, event, 
 
 ## 5. User Content
 
-You retain responsibility for names, descriptions, images, and other content you submit through the Bot. You represent that you have the right to submit that content and that it does not violate another person's rights or applicable law.
+You retain responsibility for names, descriptions, links, images, and other content you submit through the Bot. You represent that you have the right to submit that content and that it does not violate another person's rights or applicable law.
 
-You grant us a limited, non-exclusive permission to process and display submitted content only as needed to operate the Bot and its session features. This permission ends when the content is deleted from the Bot's systems, except where retention is required for legitimate operational or legal reasons.
+You grant us a limited, non-exclusive permission to process and display submitted content only as needed to operate the Bot and its features. Community welcome links and banner images are sent to Discord to publish the message and are not stored in the Bot's database. This permission ends when content is deleted from the Bot's systems or Discord message, except where retention is required for legitimate operational or legal reasons.
 
 ## 6. Third-Party Services
 

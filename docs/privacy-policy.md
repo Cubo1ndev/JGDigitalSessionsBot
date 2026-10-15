@@ -6,7 +6,7 @@
 
 **Privacy contact:** support@justgamesdigital.com
 
-This Privacy Policy explains how JustGames Digital ("we," "us," or "our") handles information when you use the JustGames Digital Sessions bot (the "Bot") on Discord.
+This Privacy Policy explains how JustGames Digital ("we," "us," or "our") handles information when you use the JustGames Digital bot (the "Bot") on Discord.
 
 > **Before publishing:** Publish this document at a stable public HTTPS URL and enter that URL as the Privacy Policy link in the Discord Developer Portal.
 
@@ -16,6 +16,7 @@ When you interact with the Bot, we may receive or store:
 
 - **Discord identifiers:** your Discord user ID, the server (guild) ID, channel ID, message ID, and role ID used to provide the Bot's features.
 - **Session information:** company name, session date and time, player limit, status, server/location name, description, host name, logo attachment URL, and session ID.
+- **Community welcome content:** links and optional banner images that a server administrator submits to publish the community welcome. These are sent to Discord for posting and are not stored in the Bot's database.
 - **Participation information:** whether you joined or left a session and the date and time you joined.
 - **Technical information from Discord:** Discord may provide interaction, account, and delivery information needed to process commands, buttons, attachments, and direct messages. The Bot does not intentionally collect your Discord password, payment information, precise location, or message history.
 

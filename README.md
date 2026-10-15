@@ -1,6 +1,6 @@
-# JustGames Digital Sessions Bot
+# JustGames Digital Bot
 
-Discord bot for hosting scheduled game sessions with interactive session cards, attendee threads, reminders, and start/end notifications.
+Discord community hub for JustGames Digital. It posts a welcome and rules panel with configurable links and images, and continues to host scheduled game sessions with interactive session cards, attendee threads, reminders, and start/end notifications.
 
 ## Setup
 
@@ -23,11 +23,15 @@ Discord bot for hosting scheduled game sessions with interactive session cards, 
 
 The SQLite database is created at `DB_PATH` on first startup.
 
+## Community Welcome
+
+In the channel where the welcome should appear, run `/community welcome`. Server members with **Manage Server** permission can provide up to two banner images and links for the website, ROBLOX group, YouTube, X, rules, FAQ, and suggestions. The bot posts the welcome and rules panels; omitted links simply do not show a button. The images and links are posted to Discord and are not saved in the bot database.
+
 ## Discord Permissions
 
 The bot needs permission to:
 
-- Send messages and use Components V2.
+- Send messages, use Components V2, and attach files (for welcome banners).
 - Create public threads and manage thread members.
 - Manage messages in session threads so non-attendees can be removed.
 - Send direct messages to attendees.
@@ -36,11 +40,12 @@ The bot needs permission to:
 
 ```text
 bot.py                 Application startup and cog loading
+cogs/community.py       Community welcome and rules panels
 cogs/sessions.py       Session commands, views, notifications, and scheduler
 database.py            SQLite persistence
 session_logic.py       Pure validation and date helpers
 checks.py              Host permission checks
-tests/                 Database and session-logic tests
+tests/                 Community, database, and session-logic tests
 data/                  Runtime SQLite data
 docs/                  Privacy policy and terms of service
 ```
