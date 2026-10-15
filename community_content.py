@@ -22,7 +22,6 @@ WEBSITE_URL = "https://justgamesdigital.com/"
 ROBLOX_GROUP_URL = "https://www.roblox.com/communities/4866418/JustGames-Digital#!/about"
 YOUTUBE_URL = "https://www.youtube.com/@JustGamesDigital"
 X_URL = "https://x.com/JustGamesGreece"
-SUGGESTIONS_URL = ""
 
 RULES_TITLE = "Discord Server Rules"
 RULES_INTRO = (

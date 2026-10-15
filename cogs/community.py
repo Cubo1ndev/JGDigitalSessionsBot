@@ -98,15 +98,17 @@ class CommunityView(discord.ui.LayoutView):
         self.rules_button.callback = self._rules
         self.faq_button.callback = self._faq
         rules_row = discord.ui.ActionRow(self.rules_button, self.faq_button)
-        for button in _link_buttons([("Suggestions", content.SUGGESTIONS_URL)]):
-            rules_row.add_item(button)
 
         for item in (
             _banner(welcome_banner, "Welcome to JustGames Digital"),
             discord.ui.Container(*welcome_children),
             discord.ui.Separator(visible=False, spacing=discord.SeparatorSpacing.large),
             _banner(rules_banner, "Rules"),
-            discord.ui.Container(discord.ui.TextDisplay(content.RULES_PANEL_TEXT), rules_row),
+            discord.ui.Container(
+                discord.ui.TextDisplay(content.RULES_PANEL_TEXT),
+                discord.ui.Separator(),
+                rules_row,
+            ),
         ):
             if item is not None:
                 self.add_item(item)
