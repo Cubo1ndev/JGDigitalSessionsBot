@@ -74,9 +74,12 @@ def build_faq_view() -> discord.ui.LayoutView:
     return _info_view(content.FAQ_TITLE, content.FAQ_INTRO, content.FAQ)
 
 
+DEFAULT_SUPPORT_ROLE_ID = 990578881012592660
+
+
 def _support_role_id() -> int | None:
     raw = os.getenv("SUPPORT_ROLE_ID", "").strip()
-    return int(raw) if raw.isdigit() else None
+    return int(raw) if raw.isdigit() else DEFAULT_SUPPORT_ROLE_ID
 
 
 TICKET_LOG_CHANNEL_ID = int(os.getenv("TICKET_LOG_CHANNEL_ID", "1003224981255233626"))
@@ -286,7 +289,7 @@ def build_ticket_view(
         discord.ui.TextDisplay(mentions),
         discord.ui.Separator(),
         discord.ui.TextDisplay(
-            f"Thanks for reaching out, {user.mention}!\n"
+            "Thanks for reaching out!\n"
             "Please describe how we can help in as much detail as you can. "
             "Our support team has been notified and will be with you shortly."
         ),
@@ -381,32 +384,6 @@ class Community(commands.GroupCog, name="community"):
     async def _before_delete_closed_tickets(self) -> None:
         await self.bot.wait_until_ready()
 
-    @app_commands.command(name="close", description="Close this support ticket (support team only)")
-    @app_commands.guild_only()
-    async def close(self, interaction: discord.Interaction) -> None:
-        thread = interaction.channel
-        ticket = await database.get_ticket(thread.id) if isinstance(thread, discord.Thread) else None
-        if ticket is None:
-            await interaction.response.send_message(
-                "This command can only be used inside a support ticket.", ephemeral=True
-            )
-            return
-        if not _is_support_staff(interaction.user):
-            await interaction.response.send_message(
-                "Only the support team can close tickets.", ephemeral=True
-            )
-            return
-        if ticket["closed_at"]:
-            await interaction.response.send_message(
-                "This ticket is already closed.", ephemeral=True
-            )
-            return
-        await interaction.response.send_message(
-            view=CloseConfirmView(thread, interaction.user),
-            ephemeral=True,
-            allowed_mentions=NO_MENTIONS,
-        )
-
     @commands.Cog.listener()
     async def on_raw_thread_delete(self, payload: discord.RawThreadDeleteEvent) -> None:
         ticket = await database.get_ticket(payload.thread_id)
@@ -478,5 +455,37 @@ class Community(commands.GroupCog, name="community"):
             raise error
 
 
+class Ticket(commands.GroupCog, name="ticket"):
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
+
+    @app_commands.command(name="close", description="Close this support ticket (support team only)")
+    @app_commands.guild_only()
+    async def close(self, interaction: discord.Interaction) -> None:
+        thread = interaction.channel
+        ticket = await database.get_ticket(thread.id) if isinstance(thread, discord.Thread) else None
+        if ticket is None:
+            await interaction.response.send_message(
+                "This command can only be used inside a support ticket.", ephemeral=True
+            )
+            return
+        if not _is_support_staff(interaction.user):
+            await interaction.response.send_message(
+                "Only the support team can close tickets.", ephemeral=True
+            )
+            return
+        if ticket["closed_at"]:
+            await interaction.response.send_message(
+                "This ticket is already closed.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            view=CloseConfirmView(thread, interaction.user),
+            ephemeral=True,
+            allowed_mentions=NO_MENTIONS,
+        )
+
+
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Community(bot))
+    await bot.add_cog(Ticket(bot))

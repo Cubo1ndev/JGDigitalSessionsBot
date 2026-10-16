@@ -26,14 +26,14 @@ SUPPORT_PLACEHOLDER = "Choose how we can help..."
 # (label, description, email) shown as dropdown options. Max 25 entries.
 SUPPORT_CONTACTS = [
     ("Support", "Help with our games or community", "support@justgamesdigital.com"),
-    ("Data Loss", "Lost progress or items in a game", "dataloss@justgamesdigital.com"),
-    ("Merch Support", "Orders and merchandise help", "merch@justgamesdigital.com"),
-    ("Game Acquisition", "Sell or partner on a game", "acquisitions@justgamesdigital.com"),
+    ("Data Loss", "Lost progress or items in a game", "support@justgamesdigital.com"),
+    ("Merch Support", "Orders and merchandise help", "support@justgamesdigital.com"),
+    ("Game Acquisition", "Sell or partner on a game", "business@justgamesdigital.com"),
     ("Business Inquiries", "Partnerships and business", "business@justgamesdigital.com"),
 ]
 
 WEBSITE_URL = "https://justgamesdigital.com/"
-ROBLOX_GROUP_URL = "https://www.roblox.com/communities/4866418/JustGames-Digital#!/about"
+ROBLOX_GROUP_URL = "https://www.roblox.com/communities/4866418"
 YOUTUBE_URL = "https://www.youtube.com/@JustGamesDigital"
 X_URL = "https://x.com/JustGamesGreece"
 TIKTOK_URL = "https://www.tiktok.com/@justgamesdigital"
@@ -98,18 +98,57 @@ RULES_NOTES = (
 )
 
 FAQ_TITLE = "Frequently Asked Questions"
-FAQ_INTRO = "Quick answers to the things we get asked most."
+FAQ_INTRO = (
+    "Quick answers about JustGames Digital, School Bus Sim and our community sessions."
+)
 # (question, answer) pairs.
 FAQ = [
     (
+        "Who is JustGames Digital?",
+        "We're a small studio dedicated to creating top-quality experiences on Roblox, "
+        "including **School Bus Sim**. Find all our links in the welcome panel above.",
+    ),
+    (
         "How do I join a session?",
-        "Click **Join** on a session post and watch your DMs for reminders.",
+        "Click **Join** on a session post. You'll be added to the session's private "
+        "thread and receive a reminder in your DMs before it starts.",
+    ),
+    (
+        "I'm not getting DMs from the bot.",
+        "Enable **Direct Messages** from server members in your Discord privacy "
+        "settings for this server, then leave and rejoin the session.",
+    ),
+    (
+        "How do I get into the game when a session starts?",
+        "You'll get a DM with the steps: open the game, click **Servers** in the main "
+        "menu, then search for the server or company name given in the message.",
+    ),
+    (
+        "Can I leave a session?",
+        "Yes, click **Leave** on the session post at any time. This frees your spot "
+        "for someone else.",
+    ),
+    (
+        "The session is full. What can I do?",
+        "Each session has a player limit. Keep an eye on the post: if someone leaves, "
+        "a spot opens up and you can click **Join**.",
+    ),
+    (
+        "Who can host a session?",
+        "Hosting is limited to members with the host role. If you'd like to host, ask a "
+        "staff member.",
+    ),
+    (
+        "I lost my progress or items in a game.",
+        "Open a **Data Loss** ticket from the support panel and tell us what happened "
+        "and when.",
+    ),
+    (
+        "How do I contact the team?",
+        "Use the support dropdown in the welcome panel. Pick a topic to see our email "
+        "or open a private ticket and a team member will join you.",
     ),
     ("How do I get a role?", "Check the role channels or ask a staff member."),
-    (
-        "How do I contact staff?",
-        "Open a support request or message a moderator.",
-    ),
     (
         "I have an idea for the community.",
         "Share it through the Suggestions channel.",

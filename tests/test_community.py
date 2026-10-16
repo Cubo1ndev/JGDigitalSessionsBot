@@ -118,7 +118,7 @@ def test_support_dropdown_shows_email_then_continue_opens_numbered_thread(monkey
 
 def test_close_command_is_staff_only_and_needs_a_ticket(monkeypatch, tmp_path):
     import database
-    from cogs.community import Community
+    from cogs.community import Ticket
 
     monkeypatch.setenv("SUPPORT_ROLE_ID", "555")
     database.set_path(str(tmp_path / "c.db"))
@@ -147,8 +147,8 @@ def test_close_command_is_staff_only_and_needs_a_ticket(monkeypatch, tmp_path):
         user = Member()
         channel = Thread()
 
-    cog = Community(None)
-    close = Community.close.callback
+    cog = Ticket(None)
+    close = Ticket.close.callback
 
     asyncio.run(close(cog, Interaction()))
     assert "inside a support ticket" in sent[-1][0][0]
