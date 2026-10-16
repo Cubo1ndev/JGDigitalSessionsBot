@@ -4,7 +4,7 @@ from pathlib import Path
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import community_content as content
 import database
@@ -80,6 +80,7 @@ def _support_role_id() -> int | None:
 
 
 TICKET_LOG_CHANNEL_ID = int(os.getenv("TICKET_LOG_CHANNEL_ID", "1003224981255233626"))
+TICKET_DELETE_AFTER_HOURS = 24
 
 
 async def log_ticket_event(
@@ -117,6 +118,7 @@ class CommunityView(discord.ui.LayoutView):
             ("Website", content.WEBSITE_URL),
             ("ROBLOX Group", content.ROBLOX_GROUP_URL),
             ("YouTube", content.YOUTUBE_URL),
+            ("TikTok", content.TIKTOK_URL),
             ("X", content.X_URL),
         ])
         if welcome_buttons:
@@ -220,9 +222,9 @@ class ConfirmTicketView(discord.ui.LayoutView):
             discord.ui.TextDisplay(
                 f"## {label}\n"
                 "You can also reach us by email at:\n"
-                f"```{email}```\n"
-                "Would you still like to open a private support thread? "
-                "Click **Continue** and our team will join you there."
+                f"**{email}**\n\n"
+                "Prefer to talk to us here? Click **Continue** to open a private "
+                "ticket and our team will join you there."
             ),
             discord.ui.Separator(),
             discord.ui.ActionRow(self.continue_button),
@@ -233,7 +235,7 @@ class ConfirmTicketView(discord.ui.LayoutView):
         await interaction.response.edit_message(view=self)
         self.stop()
         user = interaction.user
-        prefix = self.label.split()[0]
+        prefix = ticket_prefix(self.label)
         try:
             number = await database.get_next_ticket_number(prefix)
             thread = await self.channel.create_thread(
@@ -253,14 +255,14 @@ class ConfirmTicketView(discord.ui.LayoutView):
                 ),
             )
         except discord.HTTPException:
-            logger.exception("Failed to create a support thread")
+            logger.exception("Failed to create a support ticket")
             await interaction.followup.send(
-                f"I couldn't open a support thread. Please email `{self.email}` instead.",
+                f"I couldn't open a ticket. Please email **{self.email}** instead.",
                 ephemeral=True,
             )
             return
         await interaction.followup.send(
-            f"Your support thread is ready: {thread.mention}", ephemeral=True
+            f"Your ticket is ready: {thread.mention}", ephemeral=True
         )
         await log_ticket_event(
             interaction.client,
@@ -270,64 +272,73 @@ class ConfirmTicketView(discord.ui.LayoutView):
         )
 
 
+def ticket_prefix(label: str) -> str:
+    return label.strip().replace(" ", "-")
+
+
 def build_ticket_view(
     user: discord.abc.User, label: str, number: int, role_id: int | None
-) -> "TicketView":
-    return TicketView(user, label, number, role_id)
+) -> discord.ui.LayoutView:
+    mentions = f"{user.mention} {f'<@&{role_id}>' if role_id else ''}".strip()
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(discord.ui.Container(
+        discord.ui.TextDisplay(f"## 🎫 {label} • #{number:04d}"),
+        discord.ui.TextDisplay(mentions),
+        discord.ui.Separator(),
+        discord.ui.TextDisplay(
+            f"Thanks for reaching out, {user.mention}!\n"
+            "Please describe how we can help in as much detail as you can. "
+            "Our support team has been notified and will be with you shortly."
+        ),
+        discord.ui.Separator(),
+        discord.ui.TextDisplay("-# A support team member will close this ticket once it's resolved."),
+    ))
+    return view
 
 
-class TicketView(discord.ui.LayoutView):
-    def __init__(
-        self,
-        user: discord.abc.User | None = None,
-        label: str = "",
-        number: int = 0,
-        role_id: int | None = None,
-    ) -> None:
-        super().__init__(timeout=None)
-        self.close_button = discord.ui.Button(
-            label="Close Ticket",
-            style=discord.ButtonStyle.danger,
-            custom_id="ticket:close",
+class CloseConfirmView(discord.ui.LayoutView):
+    def __init__(self, thread: discord.Thread, closer: discord.abc.User) -> None:
+        super().__init__(timeout=60)
+        self.thread = thread
+        self.closer = closer
+        self.confirm_button = discord.ui.Button(
+            label="Close ticket", style=discord.ButtonStyle.danger
         )
-        self.close_button.callback = self._close
-        children: list[discord.ui.Item] = []
-        if user is not None:
-            mentions = f"{user.mention} {f'<@&{role_id}>' if role_id else ''}".strip()
-            children.extend([
-                discord.ui.TextDisplay(f"## 🎫 {label} • #{number:04d}"),
-                discord.ui.TextDisplay(mentions),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay(
-                    f"Thanks for reaching out, {user.mention}!\n"
-                    "Please describe how we can help in as much detail as you can. "
-                    "Our support team has been notified and will be with you shortly."
-                ),
-                discord.ui.Separator(),
-                discord.ui.TextDisplay("-# Only support staff can close this ticket."),
-            ])
-        children.append(discord.ui.ActionRow(self.close_button))
-        self.add_item(discord.ui.Container(*children))
+        self.cancel_button = discord.ui.Button(
+            label="Cancel", style=discord.ButtonStyle.secondary
+        )
+        self.confirm_button.callback = self._confirm
+        self.cancel_button.callback = self._cancel
+        self.add_item(discord.ui.Container(
+            discord.ui.TextDisplay(
+                "## Close this ticket?\n"
+                "The ticket will be locked now and **permanently deleted in "
+                f"{TICKET_DELETE_AFTER_HOURS} hours**."
+            ),
+            discord.ui.Separator(),
+            discord.ui.ActionRow(self.confirm_button, self.cancel_button),
+        ))
 
-    async def _close(self, interaction: discord.Interaction) -> None:
-        if not _is_support_staff(interaction.user):
-            await interaction.response.send_message(
-                "Only the support team can close tickets.", ephemeral=True
-            )
-            return
-        thread = interaction.channel
-        if not isinstance(thread, discord.Thread):
-            return
-        self.close_button.disabled = True
+    def _disable(self) -> None:
+        self.confirm_button.disabled = True
+        self.cancel_button.disabled = True
+        self.stop()
+
+    async def _cancel(self, interaction: discord.Interaction) -> None:
+        self._disable()
         await interaction.response.edit_message(view=self)
-        await thread.send(
-            view=_closed_view(interaction.user), allowed_mentions=NO_MENTIONS
-        )
-        await thread.edit(locked=True, archived=True, reason=f"Closed by {interaction.user}")
+
+    async def _confirm(self, interaction: discord.Interaction) -> None:
+        self._disable()
+        await interaction.response.edit_message(view=self)
+        thread = self.thread
+        await database.mark_ticket_closed(thread.id)
+        await thread.send(view=_closed_view(self.closer), allowed_mentions=NO_MENTIONS)
+        await thread.edit(locked=True, archived=True, reason=f"Closed by {self.closer}")
         await log_ticket_event(
             interaction.client,
             f"🔒 Ticket closed • {thread.name}",
-            [f"**Closed by:** {interaction.user.mention}", f"**Thread:** {thread.mention}"],
+            [f"**Closed by:** {self.closer.mention}", f"**Thread:** {thread.mention}"],
             discord.Colour.orange(),
         )
 
@@ -335,7 +346,10 @@ class TicketView(discord.ui.LayoutView):
 def _closed_view(closer: discord.abc.User) -> discord.ui.LayoutView:
     view = discord.ui.LayoutView(timeout=None)
     view.add_item(discord.ui.Container(
-        discord.ui.TextDisplay(f"## 🔒 Ticket closed\nClosed by {closer.mention}."),
+        discord.ui.TextDisplay(
+            f"## 🔒 Ticket closed\nClosed by {closer.mention}.\n"
+            f"-# This ticket will be deleted in {TICKET_DELETE_AFTER_HOURS} hours."
+        ),
     ))
     return view
 
@@ -345,9 +359,53 @@ class Community(commands.GroupCog, name="community"):
         self.bot = bot
 
     async def cog_load(self) -> None:
-        # Keeps the panel and ticket buttons working on already-posted messages after restarts.
+        # Keeps the panel buttons working on already-posted messages after restarts.
         self.bot.add_view(CommunityView())
-        self.bot.add_view(TicketView())
+        self.delete_closed_tickets.start()
+
+    async def cog_unload(self) -> None:
+        self.delete_closed_tickets.cancel()
+
+    @tasks.loop(minutes=10)
+    async def delete_closed_tickets(self) -> None:
+        for thread_id in await database.get_expired_closed_tickets(TICKET_DELETE_AFTER_HOURS):
+            try:
+                thread = self.bot.get_channel(thread_id) or await self.bot.fetch_channel(thread_id)
+                await thread.delete(reason="Closed ticket expired")
+            except discord.NotFound:
+                await database.remove_ticket(thread_id)
+            except discord.HTTPException:
+                logger.exception("Failed to delete closed ticket %s", thread_id)
+
+    @delete_closed_tickets.before_loop
+    async def _before_delete_closed_tickets(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @app_commands.command(name="close", description="Close this support ticket (support team only)")
+    @app_commands.guild_only()
+    async def close(self, interaction: discord.Interaction) -> None:
+        thread = interaction.channel
+        ticket = await database.get_ticket(thread.id) if isinstance(thread, discord.Thread) else None
+        if ticket is None:
+            await interaction.response.send_message(
+                "This command can only be used inside a support ticket.", ephemeral=True
+            )
+            return
+        if not _is_support_staff(interaction.user):
+            await interaction.response.send_message(
+                "Only the support team can close tickets.", ephemeral=True
+            )
+            return
+        if ticket["closed_at"]:
+            await interaction.response.send_message(
+                "This ticket is already closed.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            view=CloseConfirmView(thread, interaction.user),
+            ephemeral=True,
+            allowed_mentions=NO_MENTIONS,
+        )
 
     @commands.Cog.listener()
     async def on_raw_thread_delete(self, payload: discord.RawThreadDeleteEvent) -> None:
@@ -355,7 +413,7 @@ class Community(commands.GroupCog, name="community"):
         if ticket is None:
             return
         await database.remove_ticket(payload.thread_id)
-        name = payload.thread.name if payload.thread else f"{ticket['label'].split()[0]}-{ticket['number']:04d}"
+        name = payload.thread.name if payload.thread else f"{ticket_prefix(ticket['label'])}-{ticket['number']:04d}"
         await log_ticket_event(
             self.bot,
             f"🗑️ Ticket deleted • {name}",

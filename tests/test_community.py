@@ -3,7 +3,7 @@ import asyncio
 import discord
 
 import community_content as content
-from cogs.community import CommunityView, build_faq_view, build_rules_view, find_banner
+from cogs.community import CloseConfirmView, CommunityView, build_faq_view, build_rules_view, find_banner
 
 
 def _text_length(view: discord.ui.LayoutView) -> int:
@@ -111,20 +111,29 @@ def test_support_dropdown_shows_email_then_continue_opens_numbered_thread(monkey
         assert "<#1>" in followups[-1]
 
     assert created[0]["name"] == "Support-0001"
-    assert created[1]["name"] == "Feedback-0001"
+    assert created[1]["name"] == "Data-Loss-0001"
     assert len(logged) == len(content.SUPPORT_CONTACTS)
     assert "Ticket created" in logged[0] and "<@42>" in logged[0]
 
 
-def test_only_support_staff_can_close_tickets(monkeypatch):
-    monkeypatch.setenv("SUPPORT_ROLE_ID", "555")
-    from cogs.community import TicketView
+def test_close_command_is_staff_only_and_needs_a_ticket(monkeypatch, tmp_path):
+    import database
+    from cogs.community import Community
 
+    monkeypatch.setenv("SUPPORT_ROLE_ID", "555")
+    database.set_path(str(tmp_path / "c.db"))
+    asyncio.run(database.init_db())
     sent = []
 
     class Response:
         async def send_message(self, *args, **kwargs):
-            sent.append(args)
+            sent.append((args, kwargs))
+
+    class Thread(discord.Thread):
+        def __init__(self):
+            pass
+
+        id = 9
 
     class Member(discord.Member):
         def __init__(self):
@@ -136,9 +145,34 @@ def test_only_support_staff_can_close_tickets(monkeypatch):
     class Interaction:
         response = Response()
         user = Member()
+        channel = Thread()
 
-    asyncio.run(TicketView()._close(Interaction()))
-    assert sent and "support team" in sent[0][0]
+    cog = Community(None)
+    close = Community.close.callback
+
+    asyncio.run(close(cog, Interaction()))
+    assert "inside a support ticket" in sent[-1][0][0]
+
+    asyncio.run(database.add_ticket(9, 1, "Support", 42))
+    asyncio.run(close(cog, Interaction()))
+    assert "support team" in sent[-1][0][0]
+
+    Member.roles = [type("Role", (), {"id": 555})()]
+    asyncio.run(close(cog, Interaction()))
+    assert isinstance(sent[-1][1]["view"], CloseConfirmView)
+    assert sent[-1][1]["ephemeral"] is True
+
+
+def test_closed_tickets_expire_after_the_delay(tmp_path):
+    import database
+
+    database.set_path(str(tmp_path / "e.db"))
+    asyncio.run(database.init_db())
+    asyncio.run(database.add_ticket(1, 1, "Support", 42))
+    assert asyncio.run(database.get_expired_closed_tickets(24)) == []
+    asyncio.run(database.mark_ticket_closed(1))
+    assert asyncio.run(database.get_expired_closed_tickets(24)) == []
+    assert asyncio.run(database.get_expired_closed_tickets(0)) == [1]
 
 def test_rules_and_faq_buttons_reply_privately_with_components():
     sent = []

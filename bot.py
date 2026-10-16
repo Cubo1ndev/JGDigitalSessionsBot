@@ -36,7 +36,7 @@ class Bot(commands.Bot):
 
     async def on_ready(self) -> None:
         await self.change_presence(
-            activity=discord.CustomActivity(name="JustGames Digital • Community Hub")
+            activity=discord.CustomActivity(name="Thinking about School Bus Sim")
         )
         print(f"Logged in as {self.user} (ID: {self.user.id})")
         print(f"Guild ID: {config.GUILD_ID or 'global'}")

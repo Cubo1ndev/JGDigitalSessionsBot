@@ -1,6 +1,6 @@
 import random
 import aiosqlite
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 MIN_SESSION_ID = 100_000_000
 MAX_SESSION_ID = 999_999_999
@@ -74,9 +74,11 @@ async def init_db() -> None:
                 thread_id TEXT PRIMARY KEY,
                 number    INTEGER NOT NULL,
                 label     TEXT NOT NULL,
-                user_id   TEXT NOT NULL
+                user_id   TEXT NOT NULL,
+                closed_at TEXT
             )
         """)
+        await _add_missing_columns(db, "tickets", {"closed_at": "TEXT"})
         await db.commit()
 
 
@@ -211,12 +213,31 @@ async def add_ticket(thread_id: int, number: int, label: str, user_id: int) -> N
 async def get_ticket(thread_id: int) -> dict | None:
     async with aiosqlite.connect(_db_path) as db:
         async with db.execute(
-            "SELECT number, label, user_id FROM tickets WHERE thread_id = ?", (str(thread_id),)
+            "SELECT number, label, user_id, closed_at FROM tickets WHERE thread_id = ?",
+            (str(thread_id),),
         ) as cur:
             row = await cur.fetchone()
     if not row:
         return None
-    return {"number": row[0], "label": row[1], "user_id": int(row[2])}
+    return {"number": row[0], "label": row[1], "user_id": int(row[2]), "closed_at": row[3]}
+
+
+async def mark_ticket_closed(thread_id: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "UPDATE tickets SET closed_at = ? WHERE thread_id = ?", (_now(), str(thread_id))
+        )
+        await db.commit()
+
+
+async def get_expired_closed_tickets(hours: int) -> list[int]:
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    async with aiosqlite.connect(_db_path) as db:
+        async with db.execute(
+            "SELECT thread_id FROM tickets WHERE closed_at IS NOT NULL AND closed_at <= ?",
+            (cutoff,),
+        ) as cur:
+            return [int(row[0]) async for row in cur]
 
 
 async def remove_ticket(thread_id: int) -> None:

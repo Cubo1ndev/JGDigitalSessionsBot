@@ -25,8 +25,10 @@ SUPPORT_PANEL_TEXT = (
 SUPPORT_PLACEHOLDER = "Choose how we can help..."
 # (label, description, email) shown as dropdown options. Max 25 entries.
 SUPPORT_CONTACTS = [
-    ("Support Inquiries", "Help with our games or community", "support@justgamesdigital.com"),
-    ("Feedback", "Share ideas and suggestions", "feedback@justgamesdigital.com"),
+    ("Support", "Help with our games or community", "support@justgamesdigital.com"),
+    ("Data Loss", "Lost progress or items in a game", "dataloss@justgamesdigital.com"),
+    ("Merch Support", "Orders and merchandise help", "merch@justgamesdigital.com"),
+    ("Game Acquisition", "Sell or partner on a game", "acquisitions@justgamesdigital.com"),
     ("Business Inquiries", "Partnerships and business", "business@justgamesdigital.com"),
 ]
 
@@ -34,6 +36,7 @@ WEBSITE_URL = "https://justgamesdigital.com/"
 ROBLOX_GROUP_URL = "https://www.roblox.com/communities/4866418/JustGames-Digital#!/about"
 YOUTUBE_URL = "https://www.youtube.com/@JustGamesDigital"
 X_URL = "https://x.com/JustGamesGreece"
+TIKTOK_URL = "https://www.tiktok.com/@justgamesdigital"
 
 RULES_TITLE = "Discord Server Rules"
 RULES_INTRO = (
