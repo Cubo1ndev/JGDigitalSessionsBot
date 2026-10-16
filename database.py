@@ -69,6 +69,14 @@ async def init_db() -> None:
                 value INTEGER NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tickets (
+                thread_id TEXT PRIMARY KEY,
+                number    INTEGER NOT NULL,
+                label     TEXT NOT NULL,
+                user_id   TEXT NOT NULL
+            )
+        """)
         await db.commit()
 
 
@@ -172,6 +180,48 @@ async def set_session_banner_index(session_id: int, banner_index: int) -> None:
             "UPDATE sessions SET banner_index = ? WHERE id = ?",
             (banner_index, session_id),
         )
+        await db.commit()
+
+
+async def get_next_ticket_number(prefix: str) -> int:
+    key = f"ticket:{prefix.lower()}"
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT value FROM bot_state WHERE key = ?", (key,)) as cur:
+            row = await cur.fetchone()
+        number = (int(row[0]) if row else 0) + 1
+        await db.execute(
+            "INSERT INTO bot_state (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, number),
+        )
+        await db.commit()
+    return number
+
+
+async def add_ticket(thread_id: int, number: int, label: str, user_id: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO tickets (thread_id, number, label, user_id) VALUES (?, ?, ?, ?)",
+            (str(thread_id), number, label, str(user_id)),
+        )
+        await db.commit()
+
+
+async def get_ticket(thread_id: int) -> dict | None:
+    async with aiosqlite.connect(_db_path) as db:
+        async with db.execute(
+            "SELECT number, label, user_id FROM tickets WHERE thread_id = ?", (str(thread_id),)
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return None
+    return {"number": row[0], "label": row[1], "user_id": int(row[2])}
+
+
+async def remove_ticket(thread_id: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute("DELETE FROM tickets WHERE thread_id = ?", (str(thread_id),))
         await db.commit()
 
 

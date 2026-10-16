@@ -36,15 +36,31 @@ def test_banners_sit_outside_containers():
     )
 
 
-def test_support_dropdown_opens_private_thread_pinging_user_and_role(monkeypatch):
+class _User:
+    id = 42
+    mention = "<@42>"
+
+
+def _texts(view):
+    return " ".join(
+        item.content for item in view.walk_children() if isinstance(item, discord.ui.TextDisplay)
+    )
+
+
+def test_support_dropdown_shows_email_then_continue_opens_numbered_thread(monkeypatch, tmp_path):
+    import database
+
     monkeypatch.setenv("SUPPORT_ROLE_ID", "555")
-    created, posted, replies = [], [], []
+    database.set_path(str(tmp_path / "t.db"))
+    asyncio.run(database.init_db())
+    created, posted, sent, edited, followups, logged = [], [], [], [], [], []
 
     class Thread:
         mention = "<#1>"
+        id = 1
 
-        async def send(self, text, **kwargs):
-            posted.append((text, kwargs))
+        async def send(self, **kwargs):
+            posted.append(kwargs)
 
     class Channel(discord.TextChannel):
         def __init__(self):
@@ -54,34 +70,75 @@ def test_support_dropdown_opens_private_thread_pinging_user_and_role(monkeypatch
             created.append(kwargs)
             return Thread()
 
-    class User:
-        id = 42
-        mention = "<@42>"
-        display_name = "Tester"
-
     class Response:
-        async def defer(self, **kwargs):
-            pass
+        async def send_message(self, **kwargs):
+            sent.append(kwargs)
+
+        async def edit_message(self, **kwargs):
+            edited.append(kwargs)
 
     class Followup:
         async def send(self, text, **kwargs):
-            replies.append(text)
+            followups.append(text)
+
+    class LogChannel:
+        async def send(self, **kwargs):
+            logged.append(_texts(kwargs["view"]))
+
+    class Client:
+        def get_channel(self, _id):
+            return LogChannel()
 
     class Interaction:
         response = Response()
         followup = Followup()
         channel = Channel()
-        user = User()
+        user = _User()
+        client = Client()
 
     view = CommunityView()
-    assert len(view.support_select.options) == len(content.SUPPORT_CONTACTS)
-    for index in range(len(content.SUPPORT_CONTACTS)):
+    for index, (_, _, email) in enumerate(content.SUPPORT_CONTACTS):
         view.support_select._values = [str(index)]
         asyncio.run(view.support_select.callback(Interaction()))
+        confirm = sent[-1]["view"]
+        assert email in _texts(confirm)
+        assert sent[-1]["ephemeral"] is True
+        assert not created or len(created) == index
+        asyncio.run(confirm.continue_button.callback(Interaction()))
         assert created[-1]["type"] == discord.ChannelType.private_thread
-        assert "<@42>" in posted[-1][0] and "<@&555>" in posted[-1][0]
-        assert "<#1>" in replies[-1]
+        text = _texts(posted[-1]["view"])
+        assert "<@42>" in text and "<@&555>" in text
+        assert "<#1>" in followups[-1]
 
+    assert created[0]["name"] == "Support-0001"
+    assert created[1]["name"] == "Feedback-0001"
+    assert len(logged) == len(content.SUPPORT_CONTACTS)
+    assert "Ticket created" in logged[0] and "<@42>" in logged[0]
+
+
+def test_only_support_staff_can_close_tickets(monkeypatch):
+    monkeypatch.setenv("SUPPORT_ROLE_ID", "555")
+    from cogs.community import TicketView
+
+    sent = []
+
+    class Response:
+        async def send_message(self, *args, **kwargs):
+            sent.append(args)
+
+    class Member(discord.Member):
+        def __init__(self):
+            pass
+
+        roles = []
+        guild_permissions = discord.Permissions.none()
+
+    class Interaction:
+        response = Response()
+        user = Member()
+
+    asyncio.run(TicketView()._close(Interaction()))
+    assert sent and "support team" in sent[0][0]
 
 def test_rules_and_faq_buttons_reply_privately_with_components():
     sent = []
