@@ -240,19 +240,6 @@ class ConfirmTicketView(discord.ui.LayoutView):
         user = interaction.user
         prefix = ticket_prefix(self.label)
         role_id = _support_role_id()
-        support_role = self.channel.guild.get_role(role_id) if role_id else None
-        if role_id and support_role is None:
-            logger.error(
-                "Configured support role %s was not found in guild %s",
-                role_id,
-                self.channel.guild.id,
-            )
-            await interaction.followup.send(
-                f"I couldn't open a ticket. Please email **{self.email}** instead.",
-                ephemeral=True,
-            )
-            return
-
         try:
             number = await database.get_next_ticket_number(prefix)
             thread = await self.channel.create_thread(
@@ -262,11 +249,8 @@ class ConfirmTicketView(discord.ui.LayoutView):
                 auto_archive_duration=10080,
                 reason=f"Support ticket opened by {user}",
             )
-            members = {user.id: user}
-            if support_role is not None:
-                members.update({member.id: member for member in support_role.members})
-            for member in members.values():
-                await thread.add_user(member)
+            await thread.add_user(user)
+            # Mentioning the role below adds its members to the private thread.
             await database.add_ticket(thread.id, number, self.label, user.id)
             await thread.send(
                 view=build_ticket_view(user, self.label, number, role_id),

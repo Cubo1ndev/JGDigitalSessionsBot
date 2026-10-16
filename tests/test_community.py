@@ -65,25 +65,13 @@ def test_support_dropdown_shows_email_then_continue_opens_numbered_thread(monkey
         async def send(self, **kwargs):
             posted.append(kwargs)
 
-    support_member = type("SupportMember", (), {"id": 43})()
-
-    class Role:
-        members = [support_member]
-
     class Channel(discord.TextChannel):
         def __init__(self):
-            self.guild = Guild()
+            pass
 
         async def create_thread(self, **kwargs):
             created.append(kwargs)
             return Thread()
-
-    class Guild:
-        id = 99
-
-        def get_role(self, role_id):
-            assert role_id == 555
-            return Role()
 
     class Response:
         async def send_message(self, **kwargs):
@@ -123,7 +111,7 @@ def test_support_dropdown_shows_email_then_continue_opens_numbered_thread(monkey
             assert not created or len(created) == index
             await confirm.continue_button.callback(Interaction())
             assert created[-1]["type"] == discord.ChannelType.private_thread
-            assert set(added_members[-2:]) == {42, 43}
+            assert set(added_members[-2:]) == {42}
             text = _texts(posted[-1]["view"])
             assert "<@42>" in text and "<@&555>" in text
             assert "<#1>" in followups[-1]

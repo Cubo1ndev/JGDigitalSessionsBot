@@ -11,7 +11,6 @@ COGS = [
 ]
 
 intents = discord.Intents.default()
-intents.members = True
 
 
 class Bot(commands.Bot):

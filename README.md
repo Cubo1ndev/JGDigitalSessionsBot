@@ -41,8 +41,6 @@ The bot needs permission to:
 - Create public and private threads, manage thread members, and send messages in threads.
 - Manage messages in session threads so non-attendees can be removed.
 - Send direct messages to attendees.
-- Enable the **Server Members Intent** in the Discord Developer Portal. The bot uses it
-  to add the ticket opener and Support Team role members to each private support thread.
 - Give the Support Team role **View Channel** and **Send Messages in Threads** in the
   ticket parent channel.
 
