@@ -52,23 +52,38 @@ def test_support_dropdown_shows_email_then_continue_opens_numbered_thread(monkey
 
     monkeypatch.setenv("SUPPORT_ROLE_ID", "555")
     database.set_path(str(tmp_path / "t.db"))
-    asyncio.run(database.init_db())
     created, posted, sent, edited, followups, logged = [], [], [], [], [], []
+    added_members = []
 
     class Thread:
         mention = "<#1>"
         id = 1
 
+        async def add_user(self, member):
+            added_members.append(member.id)
+
         async def send(self, **kwargs):
             posted.append(kwargs)
 
+    support_member = type("SupportMember", (), {"id": 43})()
+
+    class Role:
+        members = [support_member]
+
     class Channel(discord.TextChannel):
         def __init__(self):
-            pass
+            self.guild = Guild()
 
         async def create_thread(self, **kwargs):
             created.append(kwargs)
             return Thread()
+
+    class Guild:
+        id = 99
+
+        def get_role(self, role_id):
+            assert role_id == 555
+            return Role()
 
     class Response:
         async def send_message(self, **kwargs):
@@ -96,24 +111,29 @@ def test_support_dropdown_shows_email_then_continue_opens_numbered_thread(monkey
         user = _User()
         client = Client()
 
-    view = CommunityView()
-    for index, (_, _, email) in enumerate(content.SUPPORT_CONTACTS):
-        view.support_select._values = [str(index)]
-        asyncio.run(view.support_select.callback(Interaction()))
-        confirm = sent[-1]["view"]
-        assert email in _texts(confirm)
-        assert sent[-1]["ephemeral"] is True
-        assert not created or len(created) == index
-        asyncio.run(confirm.continue_button.callback(Interaction()))
-        assert created[-1]["type"] == discord.ChannelType.private_thread
-        text = _texts(posted[-1]["view"])
-        assert "<@42>" in text and "<@&555>" in text
-        assert "<#1>" in followups[-1]
+    async def run():
+        await database.init_db()
+        view = CommunityView()
+        for index, (_, _, email) in enumerate(content.SUPPORT_CONTACTS):
+            view.support_select._values = [str(index)]
+            await view.support_select.callback(Interaction())
+            confirm = sent[-1]["view"]
+            assert email in _texts(confirm)
+            assert sent[-1]["ephemeral"] is True
+            assert not created or len(created) == index
+            await confirm.continue_button.callback(Interaction())
+            assert created[-1]["type"] == discord.ChannelType.private_thread
+            assert set(added_members[-2:]) == {42, 43}
+            text = _texts(posted[-1]["view"])
+            assert "<@42>" in text and "<@&555>" in text
+            assert "<#1>" in followups[-1]
 
-    assert created[0]["name"] == "Support-0001"
-    assert created[1]["name"] == "Data-Loss-0001"
-    assert len(logged) == len(content.SUPPORT_CONTACTS)
-    assert "Ticket created" in logged[0] and "<@42>" in logged[0]
+        assert created[0]["name"] == "Support-0001"
+        assert created[1]["name"] == "Data-Loss-0001"
+        assert len(logged) == len(content.SUPPORT_CONTACTS)
+        assert "Ticket created" in logged[0] and "<@42>" in logged[0]
+
+    asyncio.run(run())
 
 
 def test_close_command_is_staff_only_and_needs_a_ticket(monkeypatch, tmp_path):
