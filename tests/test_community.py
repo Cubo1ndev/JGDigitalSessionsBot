@@ -36,27 +36,51 @@ def test_banners_sit_outside_containers():
     )
 
 
-def test_support_dropdown_replies_privately_with_the_email():
-    sent = []
+def test_support_dropdown_opens_private_thread_pinging_user_and_role(monkeypatch):
+    monkeypatch.setenv("SUPPORT_ROLE_ID", "555")
+    created, posted, replies = [], [], []
+
+    class Thread:
+        mention = "<#1>"
+
+        async def send(self, text, **kwargs):
+            posted.append((text, kwargs))
+
+    class Channel(discord.TextChannel):
+        def __init__(self):
+            pass
+
+        async def create_thread(self, **kwargs):
+            created.append(kwargs)
+            return Thread()
+
+    class User:
+        id = 42
+        mention = "<@42>"
+        display_name = "Tester"
 
     class Response:
-        async def send_message(self, *args, **kwargs):
-            sent.append(kwargs)
+        async def defer(self, **kwargs):
+            pass
+
+    class Followup:
+        async def send(self, text, **kwargs):
+            replies.append(text)
 
     class Interaction:
         response = Response()
+        followup = Followup()
+        channel = Channel()
+        user = User()
 
     view = CommunityView()
     assert len(view.support_select.options) == len(content.SUPPORT_CONTACTS)
-    for index, (_, _, email) in enumerate(content.SUPPORT_CONTACTS):
+    for index in range(len(content.SUPPORT_CONTACTS)):
         view.support_select._values = [str(index)]
         asyncio.run(view.support_select.callback(Interaction()))
-        text = " ".join(
-            item.content for item in sent[-1]["view"].walk_children()
-            if isinstance(item, discord.ui.TextDisplay)
-        )
-        assert email in text
-        assert sent[-1]["ephemeral"] is True
+        assert created[-1]["type"] == discord.ChannelType.private_thread
+        assert "<@42>" in posted[-1][0] and "<@&555>" in posted[-1][0]
+        assert "<#1>" in replies[-1]
 
 
 def test_rules_and_faq_buttons_reply_privately_with_components():

@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import discord
@@ -70,6 +71,11 @@ def build_rules_view() -> discord.ui.LayoutView:
 
 def build_faq_view() -> discord.ui.LayoutView:
     return _info_view(content.FAQ_TITLE, content.FAQ_INTRO, content.FAQ)
+
+
+def _support_role_id() -> int | None:
+    raw = os.getenv("SUPPORT_ROLE_ID", "").strip()
+    return int(raw) if raw.isdigit() else None
 
 
 def build_support_view(label: str, email: str) -> discord.ui.LayoutView:
@@ -162,8 +168,45 @@ class CommunityView(discord.ui.LayoutView):
                 "That option is no longer available.", ephemeral=True
             )
             return
-        await interaction.response.send_message(
-            view=build_support_view(label, email), ephemeral=True, allowed_mentions=NO_MENTIONS
+
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Tickets can only be opened from a server text channel.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        user = interaction.user
+        try:
+            thread = await channel.create_thread(
+                name=f"{label} - {user.display_name}"[:100],
+                type=discord.ChannelType.private_thread,
+                invitable=False,
+                auto_archive_duration=1440,
+                reason=f"Support ticket opened by {user}",
+            )
+            role_id = _support_role_id()
+            role_ping = f"<@&{role_id}>" if role_id else ""
+            await thread.send(
+                f"{user.mention} {role_ping}\n"
+                f"**{label}** - thanks for reaching out! Please describe how we can help "
+                f"and the support team will be with you shortly.\n"
+                f"You can also email us at `{email}`.",
+                allowed_mentions=discord.AllowedMentions(
+                    users=[user],
+                    roles=[discord.Object(id=role_id)] if role_id else False,
+                ),
+            )
+        except discord.HTTPException:
+            logger.exception("Failed to create a support thread")
+            await interaction.followup.send(
+                f"I couldn't open a support thread. Please email `{email}` instead.",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(
+            f"Your support thread is ready: {thread.mention}", ephemeral=True
         )
 
 

@@ -20,7 +20,7 @@ RULES_PANEL_TEXT = (
 
 SUPPORT_PANEL_TEXT = (
     "Need a hand, have feedback, or want to work with us? "
-    "Pick a topic below and we'll privately show you the right email."
+    "Pick a topic below and we'll open a private thread with our support team."
 )
 SUPPORT_PLACEHOLDER = "Choose how we can help..."
 # (label, description, email) shown as dropdown options. Max 25 entries.
